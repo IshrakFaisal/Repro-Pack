@@ -1,0 +1,10 @@
+{
+  "flags": [
+    {
+      "name": "checkout_rewrite",
+      "variant": "enabled",
+      "source": "mock-flags",
+      "reason": "Workspace targeted into migration cohort"
+    }
+  ]
+}

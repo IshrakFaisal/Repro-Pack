@@ -1,0 +1,76 @@
+{
+  "ticketId": "browser-only-complaint",
+  "summary": "Chrome on Windows shows a blank billing page after I click Export. No error dialog appe...",
+  "customerImpact": "medium severity: Chrome on Windows shows a blank billing page after I click Export. No error dialog appears.",
+  "reproSteps": [
+    {
+      "step": "Chrome on Windows shows a blank billing page after I click Export.",
+      "source": "user_report",
+      "confidence": 0.76
+    },
+    {
+      "step": "Open /billing.",
+      "source": "telemetry",
+      "confidence": 0.84
+    },
+    {
+      "step": "Click Export button on /billing.",
+      "source": "telemetry",
+      "confidence": 0.84
+    }
+  ],
+  "expectedBehavior": "The reported workflow should complete successfully.",
+  "actualBehavior": "Chrome on Windows shows a blank billing page after I click Export. No error dialog appears.",
+  "environment": {
+    "browser": "Chrome",
+    "browserVersion": "124.0.6367.91",
+    "device": "Desktop",
+    "os": "Windows 11",
+    "appVersion": "not available",
+    "buildHash": "not available"
+  },
+  "featureFlags": [],
+  "timeline": [
+    {
+      "timestamp": "2026-03-25T08:14:45.000Z",
+      "source": "session",
+      "title": "page_view",
+      "detail": "Visited billing page on /billing",
+      "level": "info",
+      "relatedIds": []
+    },
+    {
+      "timestamp": "2026-03-25T08:14:54.000Z",
+      "source": "session",
+      "title": "click",
+      "detail": "Export button on /billing",
+      "level": "info",
+      "relatedIds": []
+    },
+    {
+      "timestamp": "2026-03-25T08:15:00.000Z",
+      "source": "support",
+      "title": "Ticket created",
+      "detail": "Support ticket ingested",
+      "level": "info",
+      "relatedIds": []
+    }
+  ],
+  "logs": [],
+  "samplePayload": {},
+  "sanitizationReport": [],
+  "evidence": [],
+  "confidence": {
+    "overall": 0.29,
+    "reasoning": "Corroborating providers: 1/4 (+0.06); Exact identifiers captured: 0 (+0.00); Environment completeness: 4/6 (+0.10); Trace or request correlation: missing (+0.00); Payload completeness: missing (+0.00); Average repro-step confidence: 0.81 (+0.08); Sanitizer completed with 0 actions (+0.05)",
+    "factors": [
+      "Corroborating providers: 1/4 (+0.06)",
+      "Exact identifiers captured: 0 (+0.00)",
+      "Environment completeness: 4/6 (+0.10)",
+      "Trace or request correlation: missing (+0.00)",
+      "Payload completeness: missing (+0.00)",
+      "Average repro-step confidence: 0.81 (+0.08)",
+      "Sanitizer completed with 0 actions (+0.05)"
+    ]
+  }
+}

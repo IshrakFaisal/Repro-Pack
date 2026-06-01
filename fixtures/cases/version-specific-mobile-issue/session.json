@@ -1,0 +1,22 @@
+{
+  "sessionId": "sess-mobile-01",
+  "browser": "Safari",
+  "browserVersion": "17.4",
+  "device": "iPhone 14",
+  "os": "iOS 17.4",
+  "events": [
+    {
+      "timestamp": "2026-03-25T11:29:11.000Z",
+      "type": "page_view",
+      "detail": "Opened profile page",
+      "route": "/settings/profile"
+    },
+    {
+      "timestamp": "2026-03-25T11:29:40.000Z",
+      "type": "tap",
+      "detail": "Save profile photo",
+      "route": "/settings/profile"
+    }
+  ],
+  "network": []
+}

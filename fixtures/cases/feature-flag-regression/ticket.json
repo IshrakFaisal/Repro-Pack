@@ -1,0 +1,20 @@
+{
+  "ticketId": "feature-flag-regression",
+  "complaintText": "Users in this workspace cannot open checkout after we enabled the new checkout cohort.",
+  "userId": "user-flag-01",
+  "accountId": "acct-flag-01",
+  "workspaceId": "ws-77",
+  "timestamps": {
+    "createdAt": "2026-03-25T10:05:00.000Z",
+    "updatedAt": "2026-03-25T10:08:00.000Z"
+  },
+  "attachments": [],
+  "supportAgentNotes": [
+    "Issue started after cohort rollout."
+  ],
+  "severity": "high",
+  "priority": "urgent",
+  "source": {
+    "platform": "mock-support"
+  }
+}

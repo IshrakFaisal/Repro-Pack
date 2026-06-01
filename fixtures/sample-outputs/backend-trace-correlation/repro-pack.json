@@ -1,0 +1,170 @@
+{
+  "ticketId": "backend-trace-correlation",
+  "summary": "INV-5001: Invoice creation failed",
+  "customerImpact": "high severity: Creating an invoice fails with a 500 after I submit the form.",
+  "reproSteps": [
+    {
+      "step": "Creating an invoice fails with a 500 after I submit the form.",
+      "source": "user_report",
+      "confidence": 0.76
+    },
+    {
+      "step": "Open /invoices/new.",
+      "source": "telemetry",
+      "confidence": 0.84
+    },
+    {
+      "step": "Click Submit invoice on /invoices/new.",
+      "source": "telemetry",
+      "confidence": 0.84
+    }
+  ],
+  "expectedBehavior": "The reported action should complete without backend or network errors.",
+  "actualBehavior": "Creating an invoice fails with a 500 after I submit the form.",
+  "environment": {
+    "browser": "Chrome",
+    "browserVersion": "123.0.6312.72",
+    "device": "Desktop",
+    "os": "macOS 14.4",
+    "appVersion": "2026.03.25-web",
+    "buildHash": "build-web-742abc"
+  },
+  "featureFlags": [
+    {
+      "name": "invoice_redesign",
+      "variant": "control",
+      "source": "mock-flags",
+      "reason": "Workspace enrolled in control group"
+    }
+  ],
+  "timeline": [
+    {
+      "timestamp": "2026-03-25T08:58:41.000Z",
+      "source": "session",
+      "title": "page_view",
+      "detail": "Opened invoice composer on /invoices/new",
+      "level": "info",
+      "relatedIds": []
+    },
+    {
+      "timestamp": "2026-03-25T08:58:54.000Z",
+      "source": "session",
+      "title": "click",
+      "detail": "Submit invoice on /invoices/new",
+      "level": "info",
+      "relatedIds": []
+    },
+    {
+      "timestamp": "2026-03-25T08:58:55.000Z",
+      "source": "session-network",
+      "title": "POST /api/invoices",
+      "detail": "500 Internal Server Error returned from invoice creation",
+      "level": "error",
+      "relatedIds": [
+        "req-742",
+        "tr-900"
+      ]
+    },
+    {
+      "timestamp": "2026-03-25T08:58:55.120Z",
+      "source": "billing-api",
+      "title": "Invoice creation failed",
+      "detail": "Error code INV-5001",
+      "level": "error",
+      "relatedIds": [
+        "req-742",
+        "tr-900",
+        "INV-5001"
+      ]
+    },
+    {
+      "timestamp": "2026-03-25T09:00:00.000Z",
+      "source": "support",
+      "title": "Ticket created",
+      "detail": "Support ticket ingested",
+      "level": "info",
+      "relatedIds": []
+    }
+  ],
+  "logs": [
+    {
+      "timestamp": "2026-03-25T08:58:55.120Z",
+      "level": "error",
+      "source": "billing-api",
+      "message": "Invoice creation failed",
+      "requestId": "req-742",
+      "traceId": "tr-900",
+      "errorCode": "INV-5001",
+      "metadata": {
+        "releaseIdentifier": "release-2026-03-25.1"
+      }
+    }
+  ],
+  "samplePayload": {
+    "invoiceNumber": "INV-9912",
+    "currency": "USD",
+    "customerEmail": "[REDACTED:EMAIL]"
+  },
+  "sanitizationReport": [
+    {
+      "location": "root.customerEmail",
+      "redactionType": "mask",
+      "classification": "email",
+      "replacementStrategy": "pattern_replace"
+    }
+  ],
+  "evidence": [
+    {
+      "type": "feature-flag",
+      "source": "mock-flags",
+      "summary": "invoice_redesign=control",
+      "detail": "Workspace enrolled in control group",
+      "confidence": 0.82,
+      "citation": "flag:invoice_redesign",
+      "relatedIds": [],
+      "conflict": false
+    },
+    {
+      "type": "network",
+      "source": "session-network",
+      "timestamp": "2026-03-25T08:58:55.000Z",
+      "summary": "POST /api/invoices",
+      "detail": "500 Internal Server Error returned from invoice creation",
+      "confidence": 0.93,
+      "citation": "network:req-742",
+      "relatedIds": [
+        "req-742",
+        "tr-900"
+      ],
+      "conflict": false
+    },
+    {
+      "type": "log",
+      "source": "billing-api",
+      "timestamp": "2026-03-25T08:58:55.120Z",
+      "summary": "INV-5001: Invoice creation failed",
+      "detail": "Log level error, request req-742, trace tr-900",
+      "confidence": 0.95,
+      "citation": "log:req-742",
+      "relatedIds": [
+        "req-742",
+        "tr-900",
+        "INV-5001"
+      ],
+      "conflict": false
+    }
+  ],
+  "confidence": {
+    "overall": 0.98,
+    "reasoning": "Corroborating providers: 4/4 (+0.25); Exact identifiers captured: 5 (+0.20); Environment completeness: 6/6 (+0.15); Trace or request correlation: present (+0.15); Payload completeness: present (+0.10); Average repro-step confidence: 0.81 (+0.08); Sanitizer completed with 1 actions (+0.05)",
+    "factors": [
+      "Corroborating providers: 4/4 (+0.25)",
+      "Exact identifiers captured: 5 (+0.20)",
+      "Environment completeness: 6/6 (+0.15)",
+      "Trace or request correlation: present (+0.15)",
+      "Payload completeness: present (+0.10)",
+      "Average repro-step confidence: 0.81 (+0.08)",
+      "Sanitizer completed with 1 actions (+0.05)"
+    ]
+  }
+}

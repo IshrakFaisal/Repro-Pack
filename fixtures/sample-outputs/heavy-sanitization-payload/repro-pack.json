@@ -1,0 +1,233 @@
+{
+  "ticketId": "heavy-sanitization-payload",
+  "summary": "RFND-422: Refund replay rejected due to payload validation failure",
+  "customerImpact": "high severity: Webhook replay fails when I submit a refund request from the admin panel.",
+  "reproSteps": [
+    {
+      "step": "Webhook replay fails when I submit a refund request from the admin panel.",
+      "source": "user_report",
+      "confidence": 0.76
+    },
+    {
+      "step": "Open /admin/refunds.",
+      "source": "telemetry",
+      "confidence": 0.84
+    },
+    {
+      "step": "Click Submit refund request on /admin/refunds.",
+      "source": "telemetry",
+      "confidence": 0.84
+    }
+  ],
+  "expectedBehavior": "The reported action should complete without backend or network errors.",
+  "actualBehavior": "Webhook replay fails when I submit a refund request from the admin panel.",
+  "environment": {
+    "browser": "Chrome",
+    "browserVersion": "124.0.6367.91",
+    "device": "Desktop",
+    "os": "Windows 11",
+    "appVersion": "2026.03.25-admin",
+    "buildHash": "build-refund-4d3f"
+  },
+  "featureFlags": [
+    {
+      "name": "refund_replay",
+      "variant": "enabled",
+      "source": "mock-flags",
+      "reason": "Replay flow enabled for admin pilot"
+    }
+  ],
+  "timeline": [
+    {
+      "timestamp": "2026-03-25T11:58:25.000Z",
+      "source": "session",
+      "title": "page_view",
+      "detail": "Opened refund request drawer on /admin/refunds",
+      "level": "info",
+      "relatedIds": []
+    },
+    {
+      "timestamp": "2026-03-25T11:58:33.000Z",
+      "source": "session",
+      "title": "click",
+      "detail": "Submit refund request on /admin/refunds",
+      "level": "info",
+      "relatedIds": []
+    },
+    {
+      "timestamp": "2026-03-25T11:58:34.000Z",
+      "source": "session-network",
+      "title": "POST /api/refunds/replay",
+      "detail": "422 validation error from refund replay endpoint",
+      "level": "error",
+      "relatedIds": [
+        "req-secret-88",
+        "tr-secret-88"
+      ]
+    },
+    {
+      "timestamp": "2026-03-25T11:58:34.020Z",
+      "source": "refund-api",
+      "title": "Refund replay rejected due to payload validation failure",
+      "detail": "Error code RFND-422",
+      "level": "error",
+      "relatedIds": [
+        "req-secret-88",
+        "tr-secret-88",
+        "RFND-422"
+      ]
+    },
+    {
+      "timestamp": "2026-03-25T12:00:00.000Z",
+      "source": "support",
+      "title": "Ticket created",
+      "detail": "Support ticket ingested",
+      "level": "info",
+      "relatedIds": []
+    }
+  ],
+  "logs": [
+    {
+      "timestamp": "2026-03-25T11:58:34.020Z",
+      "level": "error",
+      "source": "refund-api",
+      "message": "Refund replay rejected due to payload validation failure",
+      "requestId": "req-secret-88",
+      "traceId": "tr-secret-88",
+      "errorCode": "RFND-422",
+      "metadata": {
+        "ipAddress": "203.0.113.24"
+      }
+    }
+  ],
+  "samplePayload": {
+    "customerEmail": "[REDACTED:EMAIL]",
+    "phone": "[REDACTED:PHONE]",
+    "headers": {
+      "authorization": "[REDACTED:AUTH_HEADER]",
+      "cookie": "[REDACTED:COOKIE]",
+      "x-api-key": "[REDACTED:API_KEY]"
+    },
+    "ipAddress": "[REDACTED:IP]",
+    "accountId": "[REDACTED:IDENTIFIER]",
+    "userId": "[REDACTED:IDENTIFIER]",
+    "cardNumber": "[REDACTED:PAYMENT]",
+    "nestedSecret": "[REDACTED:SECRET]"
+  },
+  "sanitizationReport": [
+    {
+      "location": "root.customerEmail",
+      "redactionType": "mask",
+      "classification": "email",
+      "replacementStrategy": "pattern_replace"
+    },
+    {
+      "location": "root.phone",
+      "redactionType": "mask",
+      "classification": "phone",
+      "replacementStrategy": "pattern_replace"
+    },
+    {
+      "location": "root.headers.authorization",
+      "redactionType": "mask",
+      "classification": "auth-header",
+      "replacementStrategy": "replace_entire_value"
+    },
+    {
+      "location": "root.headers.cookie",
+      "redactionType": "mask",
+      "classification": "cookie",
+      "replacementStrategy": "replace_entire_value"
+    },
+    {
+      "location": "root.headers.x-api-key",
+      "redactionType": "mask",
+      "classification": "api-key",
+      "replacementStrategy": "replace_entire_value"
+    },
+    {
+      "location": "root.ipAddress",
+      "redactionType": "mask",
+      "classification": "ip-address",
+      "replacementStrategy": "pattern_replace"
+    },
+    {
+      "location": "root.accountId",
+      "redactionType": "mask",
+      "classification": "direct-identifier",
+      "replacementStrategy": "replace_entire_value"
+    },
+    {
+      "location": "root.userId",
+      "redactionType": "mask",
+      "classification": "direct-identifier",
+      "replacementStrategy": "replace_entire_value"
+    },
+    {
+      "location": "root.cardNumber",
+      "redactionType": "mask",
+      "classification": "payment-card",
+      "replacementStrategy": "pattern_replace"
+    },
+    {
+      "location": "root.nestedSecret",
+      "redactionType": "mask",
+      "classification": "secret-like-string",
+      "replacementStrategy": "pattern_replace"
+    }
+  ],
+  "evidence": [
+    {
+      "type": "feature-flag",
+      "source": "mock-flags",
+      "summary": "refund_replay=enabled",
+      "detail": "Replay flow enabled for admin pilot",
+      "confidence": 0.82,
+      "citation": "flag:refund_replay",
+      "relatedIds": [],
+      "conflict": false
+    },
+    {
+      "type": "network",
+      "source": "session-network",
+      "timestamp": "2026-03-25T11:58:34.000Z",
+      "summary": "POST /api/refunds/replay",
+      "detail": "422 validation error from refund replay endpoint",
+      "confidence": 0.93,
+      "citation": "network:req-secret-88",
+      "relatedIds": [
+        "req-secret-88",
+        "tr-secret-88"
+      ],
+      "conflict": false
+    },
+    {
+      "type": "log",
+      "source": "refund-api",
+      "timestamp": "2026-03-25T11:58:34.020Z",
+      "summary": "RFND-422: Refund replay rejected due to payload validation failure",
+      "detail": "Log level error, request req-secret-88, trace tr-secret-88",
+      "confidence": 0.95,
+      "citation": "log:req-secret-88",
+      "relatedIds": [
+        "req-secret-88",
+        "tr-secret-88",
+        "RFND-422"
+      ],
+      "conflict": false
+    }
+  ],
+  "confidence": {
+    "overall": 0.98,
+    "reasoning": "Corroborating providers: 4/4 (+0.25); Exact identifiers captured: 5 (+0.20); Environment completeness: 6/6 (+0.15); Trace or request correlation: present (+0.15); Payload completeness: present (+0.10); Average repro-step confidence: 0.81 (+0.08); Sanitizer completed with 10 actions (+0.05)",
+    "factors": [
+      "Corroborating providers: 4/4 (+0.25)",
+      "Exact identifiers captured: 5 (+0.20)",
+      "Environment completeness: 6/6 (+0.15)",
+      "Trace or request correlation: present (+0.15)",
+      "Payload completeness: present (+0.10)",
+      "Average repro-step confidence: 0.81 (+0.08)",
+      "Sanitizer completed with 10 actions (+0.05)"
+    ]
+  }
+}

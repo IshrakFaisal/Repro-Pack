@@ -1,0 +1,20 @@
+{
+  "ticketId": "backend-trace-correlation",
+  "complaintText": "Creating an invoice fails with a 500 after I submit the form.",
+  "userId": "user-trace-01",
+  "accountId": "acct-trace-01",
+  "workspaceId": "ws-trace-01",
+  "timestamps": {
+    "createdAt": "2026-03-25T09:00:00.000Z",
+    "updatedAt": "2026-03-25T09:02:00.000Z"
+  },
+  "attachments": [],
+  "supportAgentNotes": [
+    "Support reproduced once on the same workspace."
+  ],
+  "severity": "high",
+  "priority": "high",
+  "source": {
+    "platform": "mock-support"
+  }
+}

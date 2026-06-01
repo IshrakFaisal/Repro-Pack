@@ -1,0 +1,22 @@
+{
+  "entries": [
+    {
+      "timestamp": "2026-03-25T08:58:55.120Z",
+      "level": "error",
+      "source": "billing-api",
+      "message": "Invoice creation failed",
+      "requestId": "req-742",
+      "traceId": "tr-900",
+      "errorCode": "INV-5001",
+      "metadata": {
+        "releaseIdentifier": "release-2026-03-25.1"
+      }
+    }
+  ],
+  "recentErrors": [],
+  "samplePayload": {
+    "invoiceNumber": "INV-9912",
+    "currency": "USD",
+    "customerEmail": "billing.user@example.test"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "flags": [
+    {
+      "name": "refund_replay",
+      "variant": "enabled",
+      "source": "mock-flags",
+      "reason": "Replay flow enabled for admin pilot"
+    }
+  ]
+}

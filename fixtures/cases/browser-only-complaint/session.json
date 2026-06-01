@@ -1,0 +1,22 @@
+{
+  "sessionId": "sess-browser-01",
+  "browser": "Chrome",
+  "browserVersion": "124.0.6367.91",
+  "device": "Desktop",
+  "os": "Windows 11",
+  "events": [
+    {
+      "timestamp": "2026-03-25T08:14:45.000Z",
+      "type": "page_view",
+      "detail": "Visited billing page",
+      "route": "/billing"
+    },
+    {
+      "timestamp": "2026-03-25T08:14:54.000Z",
+      "type": "click",
+      "detail": "Export button",
+      "route": "/billing"
+    }
+  ],
+  "network": []
+}

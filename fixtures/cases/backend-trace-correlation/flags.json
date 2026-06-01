@@ -1,0 +1,10 @@
+{
+  "flags": [
+    {
+      "name": "invoice_redesign",
+      "variant": "control",
+      "source": "mock-flags",
+      "reason": "Workspace enrolled in control group"
+    }
+  ]
+}

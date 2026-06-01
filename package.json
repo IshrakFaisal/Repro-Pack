@@ -1,0 +1,37 @@
+{
+  "name": "support-repro-pack-mvp",
+  "version": "1.0.0",
+  "description": "Production-minded MVP for turning support tickets into developer-ready repro packs.",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "repro-pack": "dist/cli/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch src/server/start.ts",
+    "start": "node dist/server/start.js",
+    "cli": "tsx src/cli/main.ts",
+    "test": "vitest run --config ./vitest.config.mjs",
+    "test:watch": "vitest --config ./vitest.config.mjs",
+    "process:fixture": "tsx src/cli/main.ts process --ticket browser-only-complaint --dry-run",
+    "generate:samples": "tsx scripts/generate-sample-outputs.ts",
+    "check": "pnpm typecheck && pnpm test"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "fastify": "^5.2.1",
+    "pino": "^9.6.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  },
+  "packageManager": "pnpm@10.6.5"
+}

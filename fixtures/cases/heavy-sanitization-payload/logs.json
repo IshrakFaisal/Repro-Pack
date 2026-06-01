@@ -1,0 +1,31 @@
+{
+  "entries": [
+    {
+      "timestamp": "2026-03-25T11:58:34.020Z",
+      "level": "error",
+      "source": "refund-api",
+      "message": "Refund replay rejected due to payload validation failure",
+      "requestId": "req-secret-88",
+      "traceId": "tr-secret-88",
+      "errorCode": "RFND-422",
+      "metadata": {
+        "ipAddress": "203.0.113.24"
+      }
+    }
+  ],
+  "recentErrors": [],
+  "samplePayload": {
+    "customerEmail": "refund.user@example.test",
+    "phone": "+1 (202) 555-0182",
+    "headers": {
+      "authorization": "Bearer testtoken-abcdefghijklmnopqrstuvwxyz123456",
+      "cookie": "sessionid=mock-cookie-value; csrftoken=mock-csrf-token",
+      "x-api-key": "mock-api-key-abcdefghijklmnopqrstuvwxyz"
+    },
+    "ipAddress": "203.0.113.24",
+    "accountId": "acct-secret-01",
+    "userId": "user-secret-01",
+    "cardNumber": "4242 4242 4242 4242",
+    "nestedSecret": "abcdefghijklmnopqrstuvwxyz1234567890ABCD"
+  }
+}

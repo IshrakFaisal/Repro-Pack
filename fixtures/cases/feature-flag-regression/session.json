@@ -1,0 +1,32 @@
+{
+  "sessionId": "sess-flag-01",
+  "browser": "Firefox",
+  "browserVersion": "124.0",
+  "device": "Desktop",
+  "os": "Ubuntu 24.04",
+  "events": [
+    {
+      "timestamp": "2026-03-25T10:04:40.000Z",
+      "type": "page_view",
+      "detail": "Opened checkout launcher",
+      "route": "/checkout"
+    },
+    {
+      "timestamp": "2026-03-25T10:04:51.000Z",
+      "type": "click",
+      "detail": "Launch checkout",
+      "route": "/checkout"
+    }
+  ],
+  "network": [
+    {
+      "timestamp": "2026-03-25T10:04:52.000Z",
+      "method": "GET",
+      "url": "/api/checkout/v2/session",
+      "status": 404,
+      "requestId": "req-flag-17",
+      "traceId": "tr-flag-17",
+      "responseSummary": "404 returned because rollout target route was missing"
+    }
+  ]
+}

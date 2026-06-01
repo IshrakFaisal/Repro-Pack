@@ -1,0 +1,157 @@
+{
+  "ticketId": "feature-flag-regression",
+  "summary": "FLAG-ROUTE-404: Route handler missing for checkout v2 session bootstrap",
+  "customerImpact": "high severity: Users in this workspace cannot open checkout after we enabled the new checkout cohort.",
+  "reproSteps": [
+    {
+      "step": "Users in this workspace cannot open checkout after we enabled the new checkout cohort.",
+      "source": "user_report",
+      "confidence": 0.76
+    },
+    {
+      "step": "Open /checkout.",
+      "source": "telemetry",
+      "confidence": 0.84
+    },
+    {
+      "step": "Click Launch checkout on /checkout.",
+      "source": "telemetry",
+      "confidence": 0.84
+    }
+  ],
+  "expectedBehavior": "The reported action should complete without backend or network errors.",
+  "actualBehavior": "Users in this workspace cannot open checkout after we enabled the new checkout cohort.",
+  "environment": {
+    "browser": "Firefox",
+    "browserVersion": "124.0",
+    "device": "Desktop",
+    "os": "Ubuntu 24.04",
+    "appVersion": "2026.03.24-web",
+    "buildHash": "build-checkout-19ab"
+  },
+  "featureFlags": [
+    {
+      "name": "checkout_rewrite",
+      "variant": "enabled",
+      "source": "mock-flags",
+      "reason": "Workspace targeted into migration cohort"
+    }
+  ],
+  "timeline": [
+    {
+      "timestamp": "2026-03-25T10:04:40.000Z",
+      "source": "session",
+      "title": "page_view",
+      "detail": "Opened checkout launcher on /checkout",
+      "level": "info",
+      "relatedIds": []
+    },
+    {
+      "timestamp": "2026-03-25T10:04:51.000Z",
+      "source": "session",
+      "title": "click",
+      "detail": "Launch checkout on /checkout",
+      "level": "info",
+      "relatedIds": []
+    },
+    {
+      "timestamp": "2026-03-25T10:04:52.000Z",
+      "source": "session-network",
+      "title": "GET /api/checkout/v2/session",
+      "detail": "404 returned because rollout target route was missing",
+      "level": "error",
+      "relatedIds": [
+        "req-flag-17",
+        "tr-flag-17"
+      ]
+    },
+    {
+      "timestamp": "2026-03-25T10:04:52.010Z",
+      "source": "checkout-api",
+      "title": "Route handler missing for checkout v2 session bootstrap",
+      "detail": "Error code FLAG-ROUTE-404",
+      "level": "error",
+      "relatedIds": [
+        "req-flag-17",
+        "tr-flag-17",
+        "FLAG-ROUTE-404"
+      ]
+    },
+    {
+      "timestamp": "2026-03-25T10:05:00.000Z",
+      "source": "support",
+      "title": "Ticket created",
+      "detail": "Support ticket ingested",
+      "level": "info",
+      "relatedIds": []
+    }
+  ],
+  "logs": [
+    {
+      "timestamp": "2026-03-25T10:04:52.010Z",
+      "level": "error",
+      "source": "checkout-api",
+      "message": "Route handler missing for checkout v2 session bootstrap",
+      "requestId": "req-flag-17",
+      "traceId": "tr-flag-17",
+      "errorCode": "FLAG-ROUTE-404",
+      "metadata": {}
+    }
+  ],
+  "samplePayload": {},
+  "sanitizationReport": [],
+  "evidence": [
+    {
+      "type": "feature-flag",
+      "source": "mock-flags",
+      "summary": "checkout_rewrite=enabled",
+      "detail": "Workspace targeted into migration cohort",
+      "confidence": 0.82,
+      "citation": "flag:checkout_rewrite",
+      "relatedIds": [],
+      "conflict": false
+    },
+    {
+      "type": "network",
+      "source": "session-network",
+      "timestamp": "2026-03-25T10:04:52.000Z",
+      "summary": "GET /api/checkout/v2/session",
+      "detail": "404 returned because rollout target route was missing",
+      "confidence": 0.93,
+      "citation": "network:req-flag-17",
+      "relatedIds": [
+        "req-flag-17",
+        "tr-flag-17"
+      ],
+      "conflict": false
+    },
+    {
+      "type": "log",
+      "source": "checkout-api",
+      "timestamp": "2026-03-25T10:04:52.010Z",
+      "summary": "FLAG-ROUTE-404: Route handler missing for checkout v2 session bootstrap",
+      "detail": "Log level error, request req-flag-17, trace tr-flag-17",
+      "confidence": 0.95,
+      "citation": "log:req-flag-17",
+      "relatedIds": [
+        "req-flag-17",
+        "tr-flag-17",
+        "FLAG-ROUTE-404"
+      ],
+      "conflict": false
+    }
+  ],
+  "confidence": {
+    "overall": 0.88,
+    "reasoning": "Corroborating providers: 4/4 (+0.25); Exact identifiers captured: 5 (+0.20); Environment completeness: 6/6 (+0.15); Trace or request correlation: present (+0.15); Payload completeness: missing (+0.00); Average repro-step confidence: 0.81 (+0.08); Sanitizer completed with 0 actions (+0.05)",
+    "factors": [
+      "Corroborating providers: 4/4 (+0.25)",
+      "Exact identifiers captured: 5 (+0.20)",
+      "Environment completeness: 6/6 (+0.15)",
+      "Trace or request correlation: present (+0.15)",
+      "Payload completeness: missing (+0.00)",
+      "Average repro-step confidence: 0.81 (+0.08)",
+      "Sanitizer completed with 0 actions (+0.05)"
+    ]
+  }
+}

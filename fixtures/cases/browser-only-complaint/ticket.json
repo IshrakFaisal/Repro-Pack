@@ -1,0 +1,20 @@
+{
+  "ticketId": "browser-only-complaint",
+  "complaintText": "Chrome on Windows shows a blank billing page after I click Export. No error dialog appears.",
+  "userId": "user-browser-01",
+  "accountId": "acct-browser-01",
+  "workspaceId": "ws-browser-01",
+  "timestamps": {
+    "createdAt": "2026-03-25T08:15:00.000Z",
+    "updatedAt": "2026-03-25T08:20:00.000Z"
+  },
+  "attachments": [],
+  "supportAgentNotes": [
+    "Customer says it reproduces every time in the billing area."
+  ],
+  "severity": "medium",
+  "priority": "normal",
+  "source": {
+    "platform": "mock-support"
+  }
+}

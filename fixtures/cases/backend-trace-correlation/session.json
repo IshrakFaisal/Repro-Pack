@@ -1,0 +1,37 @@
+{
+  "sessionId": "sess-trace-01",
+  "browser": "Chrome",
+  "browserVersion": "123.0.6312.72",
+  "device": "Desktop",
+  "os": "macOS 14.4",
+  "events": [
+    {
+      "timestamp": "2026-03-25T08:58:41.000Z",
+      "type": "page_view",
+      "detail": "Opened invoice composer",
+      "route": "/invoices/new"
+    },
+    {
+      "timestamp": "2026-03-25T08:58:54.000Z",
+      "type": "click",
+      "detail": "Submit invoice",
+      "route": "/invoices/new"
+    }
+  ],
+  "network": [
+    {
+      "timestamp": "2026-03-25T08:58:55.000Z",
+      "method": "POST",
+      "url": "/api/invoices",
+      "status": 500,
+      "requestId": "req-742",
+      "traceId": "tr-900",
+      "responseSummary": "500 Internal Server Error returned from invoice creation",
+      "payload": {
+        "invoiceNumber": "INV-9912",
+        "currency": "USD",
+        "customerEmail": "billing.user@example.test"
+      }
+    }
+  ]
+}

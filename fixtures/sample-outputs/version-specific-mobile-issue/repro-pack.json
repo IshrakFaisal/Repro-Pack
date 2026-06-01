@@ -1,0 +1,97 @@
+{
+  "ticketId": "version-specific-mobile-issue",
+  "summary": "Conflicting browserVersion values",
+  "customerImpact": "medium severity: On Safari 17.4 on iPhone 14, tapping Save after uploading a profile photo does nothing.",
+  "reproSteps": [
+    {
+      "step": "On Safari 17.4 on iPhone 14, tapping Save after uploading a profile photo does nothing.",
+      "source": "user_report",
+      "confidence": 0.76
+    },
+    {
+      "step": "Open /settings/profile.",
+      "source": "telemetry",
+      "confidence": 0.84
+    },
+    {
+      "step": "Click Save profile photo on /settings/profile.",
+      "source": "telemetry",
+      "confidence": 0.84
+    }
+  ],
+  "expectedBehavior": "The reported workflow should complete successfully.",
+  "actualBehavior": "On Safari 17.4 on iPhone 14, tapping Save after uploading a profile photo does nothing.",
+  "environment": {
+    "browser": "Safari",
+    "browserVersion": "17.4",
+    "device": "iPhone 14",
+    "os": "iOS 17.4",
+    "appVersion": "ios-web-2026.03.20",
+    "buildHash": "build-mobile-1a2b"
+  },
+  "featureFlags": [],
+  "timeline": [
+    {
+      "timestamp": "2026-03-25T11:29:11.000Z",
+      "source": "session",
+      "title": "page_view",
+      "detail": "Opened profile page on /settings/profile",
+      "level": "info",
+      "relatedIds": []
+    },
+    {
+      "timestamp": "2026-03-25T11:29:40.000Z",
+      "source": "session",
+      "title": "tap",
+      "detail": "Save profile photo on /settings/profile",
+      "level": "info",
+      "relatedIds": []
+    },
+    {
+      "timestamp": "2026-03-25T11:30:00.000Z",
+      "source": "support",
+      "title": "Ticket created",
+      "detail": "Support ticket ingested",
+      "level": "info",
+      "relatedIds": []
+    }
+  ],
+  "logs": [],
+  "samplePayload": {},
+  "sanitizationReport": [],
+  "evidence": [
+    {
+      "type": "conflict",
+      "source": "normalizer",
+      "summary": "Conflicting browserVersion values",
+      "detail": "Ticket source reported \"17.3\" while provider data reported \"17.4\".",
+      "confidence": 0.88,
+      "citation": "conflict:browserVersion",
+      "relatedIds": [],
+      "conflict": true
+    },
+    {
+      "type": "conflict",
+      "source": "normalizer",
+      "summary": "Conflicting appVersion values",
+      "detail": "Ticket source reported \"ios-web-2026.03.19\" while provider data reported \"ios-web-2026.03.20\".",
+      "confidence": 0.88,
+      "citation": "conflict:appVersion",
+      "relatedIds": [],
+      "conflict": true
+    }
+  ],
+  "confidence": {
+    "overall": 0.51,
+    "reasoning": "Corroborating providers: 2/4 (+0.13); Exact identifiers captured: 2 (+0.10); Environment completeness: 6/6 (+0.15); Trace or request correlation: missing (+0.00); Payload completeness: missing (+0.00); Average repro-step confidence: 0.81 (+0.08); Sanitizer completed with 0 actions (+0.05)",
+    "factors": [
+      "Corroborating providers: 2/4 (+0.13)",
+      "Exact identifiers captured: 2 (+0.10)",
+      "Environment completeness: 6/6 (+0.15)",
+      "Trace or request correlation: missing (+0.00)",
+      "Payload completeness: missing (+0.00)",
+      "Average repro-step confidence: 0.81 (+0.08)",
+      "Sanitizer completed with 0 actions (+0.05)"
+    ]
+  }
+}

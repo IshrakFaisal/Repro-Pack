@@ -1,0 +1,15 @@
+{
+  "entries": [
+    {
+      "timestamp": "2026-03-25T10:04:52.010Z",
+      "level": "error",
+      "source": "checkout-api",
+      "message": "Route handler missing for checkout v2 session bootstrap",
+      "requestId": "req-flag-17",
+      "traceId": "tr-flag-17",
+      "errorCode": "FLAG-ROUTE-404",
+      "metadata": {}
+    }
+  ],
+  "recentErrors": []
+}

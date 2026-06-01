@@ -1,0 +1,20 @@
+{
+  "ticketId": "heavy-sanitization-payload",
+  "complaintText": "Webhook replay fails when I submit a refund request from the admin panel.",
+  "userId": "user-secret-01",
+  "accountId": "acct-secret-01",
+  "workspaceId": "ws-secret-01",
+  "timestamps": {
+    "createdAt": "2026-03-25T12:00:00.000Z",
+    "updatedAt": "2026-03-25T12:04:00.000Z"
+  },
+  "attachments": [],
+  "supportAgentNotes": [
+    "Customer attached request body from browser devtools."
+  ],
+  "severity": "high",
+  "priority": "high",
+  "source": {
+    "platform": "mock-support"
+  }
+}
