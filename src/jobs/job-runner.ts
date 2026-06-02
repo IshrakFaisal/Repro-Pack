@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ProcessRequestInput, ProviderSet } from "../providers/interfaces";
+import type { ProcessRequestInput, ProviderRegistry } from "../providers/interfaces";
 import type { ProcessingJob, StoredReproPack } from "../types/schemas";
 import { ReproStore } from "../persistence/store";
 import { processTicket } from "../pipeline/process-ticket";
@@ -19,23 +19,26 @@ export class JobRunner {
   private isRunning = false;
 
   constructor(
-    private readonly providers: ProviderSet,
+    private readonly providers: ProviderRegistry,
     private readonly store: ReproStore,
     private readonly logger: MinimalLogger
   ) {}
 
   async enqueue(input: ProcessRequestInput): Promise<ProcessingJob> {
+    const tenantId = input.tenantId ?? "default";
     const timestamp = new Date().toISOString();
     const job: ProcessingJob = {
       jobId: randomUUID(),
       status: "queued",
       createdAt: timestamp,
       updatedAt: timestamp,
+      tenantId,
       dryRun: Boolean(input.dryRun),
       writeArtifacts: Boolean(input.writeArtifacts),
       sourceLookup: {
         fixtureId: input.fixtureId,
-        ticketPath: input.ticketPath
+        ticketPath: input.ticketPath,
+        supportTicketId: input.supportTicketId
       }
     };
 
@@ -73,7 +76,7 @@ export class JobRunner {
   }
 
   private async runJob(item: QueueItem): Promise<void> {
-    const existing = await this.store.getJob(item.jobId);
+    const existing = await this.store.getJob(item.jobId, item.input.tenantId ?? "default");
     if (!existing) {
       return;
     }
@@ -87,17 +90,26 @@ export class JobRunner {
     this.logger.info({ event: "job.started", jobId: item.jobId });
 
     try {
-      const result = await processTicket(item.input, this.providers, this.logger);
+      const providerSet = await this.providers.create({ tenantId: item.input.tenantId });
+      const result = await processTicket(item.input, providerSet, this.logger);
       await this.store.upsertPack({
+        tenantId: item.input.tenantId ?? "default",
         ticketId: result.ticket.ticketId,
         dryRun: result.dryRun,
         sourceLookup: {
           fixtureId: item.input.fixtureId,
-          ticketPath: item.input.ticketPath
+          ticketPath: item.input.ticketPath,
+          supportTicketId: item.input.supportTicketId
         },
         reproPack: result.reproPack,
         issueDraft: result.issueDraft,
-        markdown: result.markdown
+        markdown: result.markdown,
+        providerResults: {
+          session: result.context.session,
+          logs: result.context.logs,
+          featureFlags: result.context.featureFlags,
+          release: result.context.release
+        }
       });
 
       await this.store.saveJob({
@@ -120,12 +132,14 @@ export class JobRunner {
   }
 
   async persistSynchronousResult(result: {
+    tenantId: string;
     ticketId: string;
     dryRun: boolean;
-    sourceLookup: { fixtureId?: string; ticketPath?: string };
+    sourceLookup: { fixtureId?: string; ticketPath?: string; supportTicketId?: string };
     reproPack: StoredReproPack["reproPack"];
     issueDraft: StoredReproPack["issueDraft"];
     markdown: string;
+    providerResults: StoredReproPack["providerResults"];
   }): Promise<StoredReproPack> {
     return this.store.upsertPack(result);
   }

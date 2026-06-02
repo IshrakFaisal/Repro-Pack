@@ -1,36 +1,72 @@
 # Support Ticket -> Repro Pack
 
-Production-minded TypeScript service that turns a raw support complaint into a developer-ready repro pack with evidence, sanitization, confidence scoring, review workflow, and GitHub-ready issue draft export.
+Production-oriented TypeScript service that turns support tickets into developer-ready repro packs with normalized evidence, deterministic sanitization, repro steps, confidence scoring, review workflow, and idempotent GitHub/Jira issue sync.
 
-## What It Does
+## What This Project Does
 
-- Ingests a support ticket from fixture input, direct payloads, or future provider integrations
-- Enriches the ticket with session, logs, feature flags, and release metadata
-- Normalizes evidence into a consistent internal model
-- Sanitizes payloads and records a deterministic redaction report
-- Drafts repro steps with explicit `user_report`, `telemetry`, or `inferred` provenance
-- Scores confidence using a transparent, evidence-based formula
-- Stores repro packs with review states: `draft`, `reviewed`, `approved`, `rejected`
-- Exports approved issue drafts as Markdown for GitHub filing
+- Ingests support tickets from fixture input, direct payloads, or real Zendesk ticket ids
+- Enriches tickets with logs, session replay, feature flag, and release/deploy context
+- Normalizes evidence into a consistent internal schema
+- Redacts sensitive data before issue drafting or external sync
+- Produces JSON repro packs and Markdown issue drafts
+- Supports dry-run previews before any external write
+- Persists jobs, provider results, review history, issue links, and audit events
+- Syncs approved issues to GitHub and Jira with idempotent update behavior
 
-## Why This Exists
+## Current Integration Support
 
-Support tickets often arrive missing the context engineers need to act quickly. This service is designed to turn that noisy, partial input into a compact repro pack that favors:
+### Real adapters
 
-- high signal over speculation
-- auditability over hidden magic
-- partial but correct output over aggressive guessing
+- Zendesk ticket ingestion
+- GitHub issue create/update
+- Jira issue create/update
+- Generic HTTP observability/log provider
+- Generic HTTP session replay provider
+- Generic HTTP feature flag provider
+- Generic HTTP release/deploy provider
 
-## Stack
+### Local adapters
 
-- Runtime: Node 22+
-- Package manager: `pnpm`
-- Language: TypeScript
-- HTTP server: Fastify
-- Validation: Zod
-- Logging: pino
-- Tests: Vitest
-- Persistence: local filesystem for MVP durability
+- Fixture-based ticket and context providers for deterministic testing and local development
+
+## Architecture
+
+The existing pipeline remains intact and is now wrapped by a production integration layer:
+
+1. `ticket-ingestion`
+2. `context-enrichment`
+3. `evidence-normalizer`
+4. `sanitizer`
+5. `repro-step-generator`
+6. `confidence-scorer`
+7. `issue-assembler`
+8. `persistence + audit logging + external issue sync`
+
+Key directories:
+
+```text
+src/
+  assembly/        issue and artifact assembly
+  cli/             local operator commands
+  config/          app config + tenant config resolution
+  enrichment/      provider orchestration
+  ingestion/       support ticket normalization
+  issues/          GitHub/Jira sync orchestration
+  jobs/            async job execution
+  normalization/   evidence normalization
+  persistence/     filesystem-backed state store
+  pipeline/        end-to-end processing
+  providers/       fixture + production adapters
+  repro/           repro step generation
+  runtime/         runtime composition
+  sanitizer/       deterministic redaction
+  scoring/         confidence model
+  server/          Fastify API
+  types/           schemas and integration config
+tests/             unit and integration coverage
+fixtures/          fixture tickets and golden outputs
+tenants/           tenant config files
+```
 
 ## Quick Start
 
@@ -41,180 +77,190 @@ corepack pnpm check
 corepack pnpm dev
 ```
 
-The server starts on `http://localhost:3000` by default.
+## Environment Variables
 
-## Environment
+Core app configuration:
 
-Key variables from [.env.example](C:\Users\USER\OneDrive\Desktop\New folder\Coding\Project no 2\.env.example):
+- `PORT`
+- `LOG_LEVEL`
+- `FIXTURE_ROOT`
+- `ARTIFACT_OUTPUT_DIR`
+- `DATA_ROOT`
+- `TENANT_CONFIG_ROOT`
+- `PROCESS_TIMEOUT_MS`
+- `HTTP_TIMEOUT_MS`
+- `MAX_PROVIDER_RETRIES`
+- `RETENTION_DAYS`
+- `REDACT_IPS`
+- `REDACT_DIRECT_IDENTIFIERS`
+- `APP_VERSION`
+- `BUILD_HASH`
+- `API_KEY`
 
-- `PORT`: HTTP port
-- `LOG_LEVEL`: pino log level
-- `FIXTURE_ROOT`: local ticket fixture directory
-- `ARTIFACT_OUTPUT_DIR`: optional output directory for explicit artifact writing
-- `DATA_ROOT`: persisted jobs, packs, and exported issues
-- `API_KEY`: enables API-key protection for all routes except `/health`
-- `REDACT_IPS`: redact IP addresses in payloads
-- `REDACT_DIRECT_IDENTIFIERS`: redact account/user/workspace identifiers
+Provider credentials are referenced indirectly from tenant config files using environment variable names, for example:
 
-## CLI
+- `ZENDESK_EMAIL`
+- `ZENDESK_API_TOKEN`
+- `GITHUB_TOKEN`
+- `JIRA_EMAIL`
+- `JIRA_API_TOKEN`
 
-Process a ticket synchronously:
+The tenant config never needs to contain raw secrets.
 
-```bash
-corepack pnpm cli -- process --ticket backend-trace-correlation --dry-run
-```
+## Tenant Configuration
 
-Queue async processing:
+Create one JSON file per tenant under `TENANT_CONFIG_ROOT`, for example [tenants/example-tenant.json](C:\Users\USER\OneDrive\Desktop\New folder\Coding\Project no 2\tenants\example-tenant.json).
 
-```bash
-corepack pnpm cli -- process --ticket feature-flag-regression --dry-run --async
-```
+Example capabilities:
 
-Inspect a stored pack:
+- `support`: Zendesk adapter
+- `logs`: generic HTTP log provider
+- `session`: generic HTTP session provider
+- `featureFlags`: generic HTTP feature flag provider
+- `release`: generic HTTP release provider
+- `github`: GitHub issue sync
+- `jira`: Jira issue sync
 
-```bash
-corepack pnpm cli -- pack --ticket backend-trace-correlation
-```
-
-Approve a pack:
-
-```bash
-corepack pnpm cli -- review --ticket backend-trace-correlation --status approved --reviewer qa@example.test --note "Ready to file"
-```
-
-Export an approved issue draft:
-
-```bash
-corepack pnpm cli -- export-issue --ticket backend-trace-correlation
-```
-
-## HTTP API
+## API
 
 ### Public
 
 - `GET /health`
 
-### Protected When `API_KEY` Is Set
+### Protected when `API_KEY` is configured
 
 - `POST /tickets/process`
 - `GET /jobs/:id`
 - `GET /packs`
 - `GET /packs/:ticketId`
 - `POST /packs/:ticketId/review`
+- `POST /packs/:ticketId/sync-issues`
 - `POST /issues/:ticketId/export`
 - `GET /debug/ticket/:id`
 
-Use the `x-api-key` header for protected routes.
+Use the `x-api-key` header on protected routes.
 
-Example request:
+### Process a Zendesk ticket
 
 ```json
 {
-  "fixtureId": "heavy-sanitization-payload",
-  "dryRun": true,
-  "async": false
+  "tenantId": "acme",
+  "supportTicketId": "12345",
+  "dryRun": true
 }
 ```
 
-## Review Workflow
+### Preview issue sync without writing
 
-Every processed repro pack is persisted and moves through one of four states:
-
-- `draft`: generated but not reviewed yet
-- `reviewed`: checked by a human reviewer
-- `approved`: ready for issue export
-- `rejected`: held back due to missing or conflicting evidence
-
-Issue export is only allowed from `approved`.
-
-## Repository Layout
-
-```text
-src/
-  assembly/        artifact builders
-  cli/             local operator commands
-  config/          environment config
-  enrichment/      provider orchestration
-  ingestion/       support ticket normalization
-  jobs/            async job runner
-  normalization/   canonical evidence shaping
-  persistence/     filesystem-backed store
-  pipeline/        end-to-end processing
-  providers/       provider interfaces + mock adapters
-  repro/           repro-step generation
-  runtime/         app runtime composition
-  sanitizer/       deterministic redaction
-  scoring/         confidence scoring
-  server/          Fastify API
-  types/           schemas and shared types
-  utils/           filesystem, logging, text helpers
-tests/             unit and integration tests
-fixtures/          sample ticket inputs and generated outputs
-scripts/           helper scripts
+```json
+{
+  "tenantId": "acme",
+  "dryRun": true,
+  "targets": ["github", "jira"]
+}
 ```
 
-## Processing Pipeline
+### Perform idempotent issue sync
 
-1. `ticket-ingestion`
-2. `context-enrichment`
-3. `evidence-normalizer`
-4. `sanitizer`
-5. `repro-step-generator`
-6. `confidence-scorer`
-7. `issue-assembler`
-8. `persistence + review workflow`
-
-The core orchestrator is [src/pipeline/process-ticket.ts](C:\Users\USER\OneDrive\Desktop\New folder\Coding\Project no 2\src\pipeline\process-ticket.ts).
-
-## Confidence Model
-
-The overall confidence score is capped at `1.0` and currently weights:
-
-- corroborating providers: `0.25`
-- exact identifiers: `0.20`
-- environment completeness: `0.15`
-- request/trace correlation: `0.15`
-- payload completeness: `0.10`
-- repro-step confidence: `0.10`
-- sanitizer completion: `0.05`
-
-Each generated repro pack includes the full reasoning string so the score stays reviewable and easy to tune.
-
-## Fixtures And Sample Outputs
-
-Fixture cases live under [fixtures/cases](C:\Users\USER\OneDrive\Desktop\New folder\Coding\Project no 2\fixtures\cases):
-
-- `browser-only-complaint`
-- `backend-trace-correlation`
-- `feature-flag-regression`
-- `version-specific-mobile-issue`
-- `heavy-sanitization-payload`
-
-Golden sample outputs live under [fixtures/sample-outputs](C:\Users\USER\OneDrive\Desktop\New folder\Coding\Project no 2\fixtures\sample-outputs).
-
-Regenerate them with:
-
-```bash
-corepack pnpm generate:samples
+```json
+{
+  "tenantId": "acme",
+  "dryRun": false,
+  "targets": ["github", "jira"]
+}
 ```
 
-## Quality Checks
+## CLI
+
+Process a local fixture:
 
 ```bash
-corepack pnpm typecheck
+corepack pnpm cli -- process --ticket backend-trace-correlation --dry-run
+```
+
+Process a Zendesk ticket for a tenant:
+
+```bash
+corepack pnpm cli -- process --tenant acme --support-ticket-id 12345 --dry-run
+```
+
+Approve a stored pack:
+
+```bash
+corepack pnpm cli -- review --tenant acme --ticket zendesk-12345 --status approved --reviewer qa@example.test --note "Evidence verified"
+```
+
+Preview external sync:
+
+```bash
+corepack pnpm cli -- sync-issues --tenant acme --ticket zendesk-12345
+```
+
+Write to GitHub and Jira:
+
+```bash
+corepack pnpm cli -- sync-issues --tenant acme --ticket zendesk-12345 --write
+```
+
+## Idempotency
+
+External issue writes are designed to be repeat-safe:
+
+- issue sync stores `issueLinks` per ticket and target
+- repeated syncs update existing GitHub/Jira issues instead of creating duplicates
+- hidden repro-pack markers are embedded into synced issue bodies/descriptions to help re-discovery
+
+## Persistence and Retention
+
+State is persisted under `DATA_ROOT`:
+
+- `jobs/`: async processing jobs
+- `packs/`: stored repro packs and provider results
+- `issues/`: exported Markdown issue drafts
+- `audit/`: audit events for processing, review, and issue sync
+
+Retention cleanup runs during store initialization and removes stale data older than `RETENTION_DAYS`.
+
+## Security Model
+
+- Raw secrets are resolved from environment variables, not tenant config files
+- All external issue sync flows use already-sanitized issue drafts
+- Protected endpoints require `API_KEY` when configured
+- Sanitization remains deterministic and reportable
+- Audit logs record operational actions without logging raw credentials
+
+## Testing
+
+Run the full suite:
+
+```bash
 corepack pnpm test
+```
+
+Run build + tests:
+
+```bash
 corepack pnpm check
 ```
 
-## Current Limits
+The integration suite now covers:
 
-- Real external providers are not wired yet; shipped adapters are fixture-backed
-- Persistence is filesystem-based, not database-backed
-- Async jobs are in-process and single-worker only
-- GitHub issues are exported as Markdown drafts, not created automatically
-- Jira and Slack integrations are intentionally out of scope for now
-- Root-cause claims stay conservative and evidence-backed
+- fixture-based local processing
+- production-like Zendesk + GitHub + Jira adapters
+- rate-limit retry handling
+- tenant config resolution
+- idempotent issue sync behavior
+- protected API routes
 
-## Next Recommended Step
+## Deployment Notes
 
-The highest-value next slice is to add one real support provider and one real logs/traces provider behind the existing interfaces in [src/providers/interfaces.ts](C:\Users\USER\OneDrive\Desktop\New folder\Coding\Project no 2\src\providers\interfaces.ts), while preserving the current mock fixtures as deterministic test doubles.
+Recommended production setup:
+
+- run behind a private network or authenticated internal gateway
+- set `API_KEY`
+- mount persistent storage for `DATA_ROOT`
+- inject provider credentials via environment variables or a secrets manager
+- define one tenant file per customer/workspace under `TENANT_CONFIG_ROOT`
+- monitor audit logs and storage retention
+
+For higher-scale deployment, the next step would be replacing filesystem persistence with a database and moving background jobs to a dedicated queue/worker model.

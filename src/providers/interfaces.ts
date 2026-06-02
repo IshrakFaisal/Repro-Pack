@@ -1,4 +1,5 @@
 import type { AppConfig } from "../config/env";
+import type { IssueLink, IssueTarget, ResolvedTenantConfig } from "../types/integrations";
 import type {
   EnrichedContext,
   FeatureFlagContext,
@@ -15,6 +16,9 @@ export type TicketLookup =
     }
   | {
       ticketPath: string;
+    }
+  | {
+      supportTicketId: string;
     };
 
 export interface SupportProvider {
@@ -42,20 +46,36 @@ export interface SessionProvider {
   fetch(ticket: SupportTicket): Promise<ProviderResultOf<SessionContext>>;
 }
 
+export interface IssueTrackerProvider {
+  name: string;
+  target: IssueTarget;
+  sync(input: {
+    tenantId: string;
+    ticket: SupportTicket;
+    issueDraft: import("../types/schemas").IssueDraft;
+    existingLink?: IssueLink;
+    dryRun: boolean;
+  }): Promise<IssueLink>;
+}
+
 export type ProviderSet = {
   config: AppConfig;
+  tenant: ResolvedTenantConfig | undefined;
   support: SupportProvider;
   logs: LogsProvider;
   featureFlags: FeatureFlagProvider;
   release: ReleaseProvider;
   session: SessionProvider;
+  issueTrackers: Partial<Record<IssueTarget, IssueTrackerProvider>>;
 };
 
 export type ProcessRequestInput = {
+  tenantId?: string;
   dryRun?: boolean;
   writeArtifacts?: boolean;
   fixtureId?: string;
   ticketPath?: string;
+  supportTicketId?: string;
   ticket?: unknown;
 };
 
@@ -71,3 +91,7 @@ export type ProcessResult = {
   };
   dryRun: boolean;
 };
+
+export interface ProviderRegistry {
+  create(input?: { tenantId?: string }): Promise<ProviderSet>;
+}

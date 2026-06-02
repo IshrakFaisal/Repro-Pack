@@ -9,7 +9,11 @@ export type AppConfig = {
   fixtureRoot: string;
   artifactOutputDir: string;
   dataRoot: string;
+  tenantConfigRoot: string;
   processTimeoutMs: number;
+  httpTimeoutMs: number;
+  maxProviderRetries: number;
+  retentionDays: number;
   redactIps: boolean;
   redactDirectIdentifiers: boolean;
   appVersion: string;
@@ -32,7 +36,11 @@ export function loadConfig(cwd = process.cwd()): AppConfig {
     fixtureRoot: path.resolve(cwd, process.env.FIXTURE_ROOT ?? "fixtures/cases"),
     artifactOutputDir: path.resolve(cwd, process.env.ARTIFACT_OUTPUT_DIR ?? "artifacts"),
     dataRoot: path.resolve(cwd, process.env.DATA_ROOT ?? "data"),
+    tenantConfigRoot: path.resolve(cwd, process.env.TENANT_CONFIG_ROOT ?? "tenants"),
     processTimeoutMs: Number(process.env.PROCESS_TIMEOUT_MS ?? 2500),
+    httpTimeoutMs: Number(process.env.HTTP_TIMEOUT_MS ?? 5000),
+    maxProviderRetries: Number(process.env.MAX_PROVIDER_RETRIES ?? 2),
+    retentionDays: Number(process.env.RETENTION_DAYS ?? 30),
     redactIps: toBoolean(process.env.REDACT_IPS, true),
     redactDirectIdentifiers: toBoolean(process.env.REDACT_DIRECT_IDENTIFIERS, true),
     appVersion: process.env.APP_VERSION ?? "1.0.0",

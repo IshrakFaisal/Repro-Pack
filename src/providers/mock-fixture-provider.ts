@@ -72,10 +72,11 @@ export class FixtureSupportProvider implements SupportProvider {
   constructor(private readonly fixtureRoot: string) {}
 
   async loadTicket(lookup: TicketLookup): Promise<SupportTicket> {
-    const filePath =
-      "fixtureId" in lookup
-        ? path.join(this.fixtureRoot, lookup.fixtureId, "ticket.json")
-        : path.resolve(lookup.ticketPath);
+    const filePath = "fixtureId" in lookup
+      ? path.join(this.fixtureRoot, lookup.fixtureId, "ticket.json")
+      : "ticketPath" in lookup
+        ? path.resolve(lookup.ticketPath)
+        : path.join(this.fixtureRoot, lookup.supportTicketId, "ticket.json");
     const raw = await readJsonFile<unknown>(filePath);
     return SupportTicketSchema.parse(raw);
   }

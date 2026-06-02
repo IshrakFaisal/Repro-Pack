@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { IssueLinkSchema } from "./integrations";
 
 export const ProviderStatusSchema = z.enum(["success", "unavailable", "error"]);
 
@@ -194,6 +195,7 @@ export const ReviewDecisionSchema = z.object({
 });
 
 export const StoredReproPackSchema = z.object({
+  tenantId: z.string().default("default"),
   ticketId: z.string(),
   status: ReviewStatusSchema,
   createdAt: z.string(),
@@ -202,12 +204,22 @@ export const StoredReproPackSchema = z.object({
   sourceLookup: z
     .object({
       fixtureId: z.string().optional(),
-      ticketPath: z.string().optional()
+      ticketPath: z.string().optional(),
+      supportTicketId: z.string().optional()
     })
     .default({}),
   reproPack: ReproPackSchema,
   issueDraft: IssueDraftSchema,
   markdown: z.string(),
+  providerResults: z
+    .object({
+      session: ProviderResultSchema.optional(),
+      logs: ProviderResultSchema.optional(),
+      featureFlags: ProviderResultSchema.optional(),
+      release: ProviderResultSchema.optional()
+    })
+    .default({}),
+  issueLinks: z.array(IssueLinkSchema).default([]),
   reviewHistory: z.array(ReviewDecisionSchema).default([])
 });
 
@@ -218,13 +230,15 @@ export const ProcessingJobSchema = z.object({
   status: ProcessingJobStatusSchema,
   createdAt: z.string(),
   updatedAt: z.string(),
+  tenantId: z.string().default("default"),
   dryRun: z.boolean(),
   writeArtifacts: z.boolean(),
   ticketId: z.string().optional(),
   sourceLookup: z
     .object({
       fixtureId: z.string().optional(),
-      ticketPath: z.string().optional()
+      ticketPath: z.string().optional(),
+      supportTicketId: z.string().optional()
     })
     .default({}),
   error: z.string().optional()

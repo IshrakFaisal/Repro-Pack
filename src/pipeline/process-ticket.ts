@@ -53,7 +53,11 @@ export async function processTicket(
   }
 
   const normalized = normalizeEvidence(context);
-  const sanitizedPayload = sanitizePayload(normalized.samplePayloadCandidate, providers.config);
+  const sanitizedPayload = sanitizePayload(normalized.samplePayloadCandidate, {
+    ...providers.config,
+    redactDirectIdentifiers:
+      providers.tenant?.redactDirectIdentifiers ?? providers.config.redactDirectIdentifiers
+  });
   logger.info({
     event: "sanitizer.completed",
     ticketId: ticket.ticketId,

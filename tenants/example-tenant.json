@@ -1,0 +1,55 @@
+{
+  "tenantId": "example",
+  "name": "Example Tenant",
+  "redactDirectIdentifiers": true,
+  "retentionDays": 30,
+  "providers": {
+    "support": {
+      "type": "zendesk",
+      "baseUrl": "https://example.zendesk.com",
+      "email": { "env": "ZENDESK_EMAIL" },
+      "apiToken": { "env": "ZENDESK_API_TOKEN" }
+    },
+    "logs": {
+      "type": "http-logs",
+      "baseUrl": "https://observability.internal.example",
+      "path": "/logs",
+      "bearerToken": { "env": "LOGS_API_TOKEN" }
+    },
+    "session": {
+      "type": "http-session",
+      "baseUrl": "https://replay.internal.example",
+      "path": "/sessions",
+      "bearerToken": { "env": "SESSION_API_TOKEN" }
+    },
+    "featureFlags": {
+      "type": "http-flags",
+      "baseUrl": "https://flags.internal.example",
+      "path": "/flags",
+      "bearerToken": { "env": "FLAGS_API_TOKEN" }
+    },
+    "release": {
+      "type": "http-release",
+      "baseUrl": "https://deploys.internal.example",
+      "path": "/release",
+      "bearerToken": { "env": "RELEASE_API_TOKEN" }
+    },
+    "github": {
+      "type": "github",
+      "baseUrl": "https://api.github.com",
+      "owner": "example-org",
+      "repo": "repro-packs",
+      "token": { "env": "GITHUB_TOKEN" },
+      "labels": ["support", "bug", "repro-pack"]
+    },
+    "jira": {
+      "type": "jira",
+      "baseUrl": "https://example.atlassian.net",
+      "projectKey": "SUP",
+      "issueType": "Bug",
+      "email": { "env": "JIRA_EMAIL" },
+      "apiToken": { "env": "JIRA_API_TOKEN" },
+      "labels": ["support", "repro-pack"]
+    }
+  }
+}

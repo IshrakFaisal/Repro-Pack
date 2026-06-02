@@ -94,5 +94,9 @@ export async function ingestTicket(
     return providers.support.loadTicket({ ticketPath: input.ticketPath });
   }
 
+  if (input.supportTicketId) {
+    return providers.support.loadTicket({ supportTicketId: input.supportTicketId });
+  }
+
   throw new Error("A ticket payload, fixtureId, or ticketPath is required");
 }
