@@ -1,5 +1,7 @@
 import Fastify from "fastify";
 import { z } from "zod";
+import { ensureRole, authenticateRequest, type AuthActor } from "../auth/auth";
+import { classifyError } from "../observability/errors";
 import { processTicket } from "../pipeline/process-ticket";
 import { ingestTicket } from "../ingestion/ticket-ingestion";
 import { enrichContext } from "../enrichment/context-enrichment";
@@ -39,26 +41,65 @@ const IssueSyncRequestSchema = z.object({
   targets: z.array(z.enum(["github", "jira"])).default(["github", "jira"])
 });
 
-function createUnauthorizedError() {
-  const error = new Error("Unauthorized");
-  (error as Error & { statusCode?: number }).statusCode = 401;
-  return error;
+function tenantIdFromRequest(request: { headers: Record<string, unknown>; body?: unknown; query?: unknown }): string | undefined {
+  const headerTenant = request.headers["x-tenant-id"];
+  if (typeof headerTenant === "string" && headerTenant.trim()) {
+    return headerTenant.trim();
+  }
+
+  if (request.body && typeof request.body === "object" && request.body !== null && "tenantId" in request.body) {
+    const bodyTenant = (request.body as { tenantId?: unknown }).tenantId;
+    if (typeof bodyTenant === "string" && bodyTenant.trim()) {
+      return bodyTenant.trim();
+    }
+  }
+
+  if (request.query && typeof request.query === "object" && request.query !== null && "tenantId" in request.query) {
+    const queryTenant = (request.query as { tenantId?: unknown }).tenantId;
+    if (typeof queryTenant === "string" && queryTenant.trim()) {
+      return queryTenant.trim();
+    }
+  }
+
+  return undefined;
 }
 
 export async function createApp() {
   const runtime = await createRuntime();
-  const { config, logger, providers, store, jobs } = runtime;
+  const { config, logger, metrics, providers, store, jobs } = runtime;
   const app = Fastify({ loggerInstance: logger });
 
-  app.addHook("onRequest", async (request) => {
-    if (request.url === "/health" || !config.apiKey) {
+  async function resolveActor(request: Parameters<typeof authenticateRequest>[0]["request"]): Promise<AuthActor | undefined> {
+    const tenantId = tenantIdFromRequest({ headers: request.headers as Record<string, unknown>, body: request.body, query: request.query });
+    const providerSet = await providers.create({ tenantId });
+    return authenticateRequest({ request, config, tenant: providerSet.tenant });
+  }
+
+  app.addHook("preHandler", async (request) => {
+    const publicPaths = new Set(["/health", "/health/live", "/health/ready", "/metrics"]);
+    const requestPath = request.url.split("?")[0] ?? request.url;
+    if (publicPaths.has(requestPath)) {
       return;
     }
 
-    const headerValue = request.headers["x-api-key"];
-    if (headerValue !== config.apiKey) {
-      throw createUnauthorizedError();
+    const actor = await resolveActor(request);
+    if (!actor) {
+      const tenantId = tenantIdFromRequest({ headers: request.headers as Record<string, unknown>, body: request.body, query: request.query }) ?? "default";
+      await store.recordAuditEvent({
+        tenantId,
+        action: "auth.failed",
+        outcome: "error",
+        metadata: {
+          route: request.url,
+          method: request.method
+        }
+      });
+      const error = new Error("Unauthorized");
+      (error as Error & { statusCode?: number }).statusCode = 401;
+      throw error;
     }
+
+    (request as FastifyRequestWithActor).authActor = actor;
   });
 
   app.get("/health", async () => ({
@@ -66,21 +107,37 @@ export async function createApp() {
     version: config.appVersion,
     buildHash: config.buildHash,
     dataRoot: config.dataRoot,
-    tenantConfigRoot: config.tenantConfigRoot
+    tenantConfigRoot: config.tenantConfigRoot,
+    storageDriver: config.storageDriver
   }));
 
+  app.get("/health/live", async () => ({ status: "live" }));
+  app.get("/health/ready", async () => ({ status: "ready", storageDriver: config.storageDriver }));
+  app.get("/metrics", async (_request, reply) => {
+    reply.type("text/plain; version=0.0.4");
+    return metrics.renderPrometheus();
+  });
+
   app.post("/tickets/process", async (request, reply) => {
+    const actor = ensureRole((request as FastifyRequestWithActor).authActor, "process");
     const body = ProcessRequestSchema.parse(request.body);
 
     if (body.async) {
-      const job = await jobs.enqueue(body);
+      const job = await jobs.enqueue({ ...body, actor });
+      await store.recordAuditEvent({
+        tenantId: body.tenantId ?? actor.tenantId,
+        action: "ticket.processing.enqueued",
+        outcome: "success",
+        actor,
+        metadata: { jobId: job.jobId }
+      });
       reply.status(202).send(job);
       return;
     }
 
     const providerSet = await providers.create({ tenantId: body.tenantId });
-    const result = await processTicket(body, providerSet, logger);
-    const tenantId = body.tenantId ?? "default";
+    const result = await processTicket(body, providerSet, logger, metrics);
+    const tenantId = body.tenantId ?? actor.tenantId;
     const storedPack = await jobs.persistSynchronousResult({
       tenantId,
       ticketId: result.ticket.ticketId,
@@ -106,6 +163,7 @@ export async function createApp() {
       ticketId: result.ticket.ticketId,
       action: "ticket.processed",
       outcome: "success",
+      actor,
       metadata: {
         dryRun: result.dryRun,
         issueLinks: storedPack.issueLinks.length
@@ -125,6 +183,7 @@ export async function createApp() {
   });
 
   app.get("/jobs/:id", async (request, reply) => {
+    ensureRole((request as FastifyRequestWithActor).authActor, "read");
     const params = z.object({ id: z.string() }).parse(request.params);
     const query = TenantQuerySchema.parse(request.query);
     const tenantId = query.tenantId ?? "default";
@@ -139,6 +198,7 @@ export async function createApp() {
   });
 
   app.get("/packs", async (request) => {
+    ensureRole((request as FastifyRequestWithActor).authActor, "read");
     const query = TenantQuerySchema.parse(request.query);
     const packs = await store.listPacks(query.tenantId);
     return packs.map((pack) => ({
@@ -153,6 +213,7 @@ export async function createApp() {
   });
 
   app.get("/packs/:ticketId", async (request, reply) => {
+    ensureRole((request as FastifyRequestWithActor).authActor, "read");
     const params = z.object({ ticketId: z.string() }).parse(request.params);
     const query = TenantQuerySchema.parse(request.query);
     const pack = await store.getPack(params.ticketId, query.tenantId ?? "default");
@@ -166,23 +227,26 @@ export async function createApp() {
   });
 
   app.post("/packs/:ticketId/review", async (request, reply) => {
+    const actor = ensureRole((request as FastifyRequestWithActor).authActor, "review");
     const params = z.object({ ticketId: z.string() }).parse(request.params);
     const body = ReviewRequestSchema.parse(request.body);
     const updated = await store.reviewPack({
-      tenantId: body.tenantId ?? "default",
+      tenantId: body.tenantId ?? actor.tenantId,
       ticketId: params.ticketId,
       status: body.status,
-      reviewer: body.reviewer,
-      note: body.note
+      reviewer: body.reviewer ?? actor.actorId,
+      note: body.note,
+      actor
     });
 
     reply.send(updated);
   });
 
   app.post("/packs/:ticketId/sync-issues", async (request, reply) => {
+    const actor = ensureRole((request as FastifyRequestWithActor).authActor, "sync");
     const params = z.object({ ticketId: z.string() }).parse(request.params);
     const body = IssueSyncRequestSchema.parse(request.body);
-    const tenantId = body.tenantId ?? "default";
+    const tenantId = body.tenantId ?? actor.tenantId;
     const providerSet = await providers.create({ tenantId });
     const results = await syncIssuesForPack({
       tenantId,
@@ -190,7 +254,9 @@ export async function createApp() {
       providers: providerSet,
       store,
       targets: body.targets,
-      dryRun: body.dryRun
+      dryRun: body.dryRun,
+      actor,
+      metrics
     });
 
     reply.send({
@@ -202,17 +268,19 @@ export async function createApp() {
   });
 
   app.post("/issues/:ticketId/export", async (request, reply) => {
+    const actor = ensureRole((request as FastifyRequestWithActor).authActor, "read");
     const params = z.object({ ticketId: z.string() }).parse(request.params);
     const body = z.object({ tenantId: z.string().optional(), target: z.enum(["github", "jira"]).optional() }).parse(request.body ?? {});
-    const issuePath = await store.exportIssueDraft(params.ticketId, body.tenantId ?? "default", body.target ?? "github");
+    const issuePath = await store.exportIssueDraft(params.ticketId, body.tenantId ?? actor.tenantId, body.target ?? "github");
     reply.send({
-      tenantId: body.tenantId ?? "default",
+      tenantId: body.tenantId ?? actor.tenantId,
       ticketId: params.ticketId,
       issuePath
     });
   });
 
   app.get("/debug/ticket/:id", async (request) => {
+    ensureRole((request as FastifyRequestWithActor).authActor, "read");
     const params = z.object({ id: z.string() }).parse(request.params);
     const query = TenantQuerySchema.parse(request.query);
     const providerSet = await providers.create({ tenantId: query.tenantId });
@@ -262,15 +330,32 @@ export async function createApp() {
     };
   });
 
-  app.setErrorHandler((error, _request, reply) => {
-    const message = error instanceof Error ? error.message : "Unknown request error";
-    const statusCode =
-      typeof (error as { statusCode?: number }).statusCode === "number"
-        ? (error as { statusCode: number }).statusCode
-        : 400;
-    logger.error({ event: "process.failed", error: message, statusCode }, "Request failed");
-    reply.status(statusCode).send({ error: message });
+  app.setErrorHandler(async (error, request, reply) => {
+    const classified = classifyError(error);
+    logger.error({ event: "process.failed", error: classified.message, code: classified.code, statusCode: classified.statusCode }, "Request failed");
+    const tenantId = tenantIdFromRequest({ headers: request.headers as Record<string, unknown>, body: request.body, query: request.query }) ?? "default";
+    await store.recordAuditEvent({
+      tenantId,
+      action: classified.code === "request_error" ? "request.failed" : "request.error",
+      outcome: "error",
+      actor: (request as FastifyRequestWithActor).authActor,
+      metadata: {
+        route: request.url,
+        method: request.method,
+        errorCode: classified.code,
+        statusCode: classified.statusCode
+      }
+    });
+    reply.status(classified.statusCode).send({ error: classified.message, code: classified.code });
+  });
+
+  app.addHook("onClose", async () => {
+    await jobs.stop();
   });
 
   return app;
 }
+
+type FastifyRequestWithActor = {
+  authActor?: AuthActor;
+};

@@ -10,9 +10,13 @@ export type AppConfig = {
   artifactOutputDir: string;
   dataRoot: string;
   tenantConfigRoot: string;
+  storageDriver: "fs" | "sqlite";
+  sqliteDatabasePath: string;
   processTimeoutMs: number;
   httpTimeoutMs: number;
   maxProviderRetries: number;
+  queuePollMs: number;
+  queueLeaseMs: number;
   retentionDays: number;
   redactIps: boolean;
   redactDirectIdentifiers: boolean;
@@ -37,9 +41,13 @@ export function loadConfig(cwd = process.cwd()): AppConfig {
     artifactOutputDir: path.resolve(cwd, process.env.ARTIFACT_OUTPUT_DIR ?? "artifacts"),
     dataRoot: path.resolve(cwd, process.env.DATA_ROOT ?? "data"),
     tenantConfigRoot: path.resolve(cwd, process.env.TENANT_CONFIG_ROOT ?? "tenants"),
+    storageDriver: (process.env.STORAGE_DRIVER === "sqlite" ? "sqlite" : "fs"),
+    sqliteDatabasePath: path.resolve(cwd, process.env.SQLITE_DATABASE_PATH ?? "data/repro-pack.sqlite"),
     processTimeoutMs: Number(process.env.PROCESS_TIMEOUT_MS ?? 2500),
     httpTimeoutMs: Number(process.env.HTTP_TIMEOUT_MS ?? 5000),
     maxProviderRetries: Number(process.env.MAX_PROVIDER_RETRIES ?? 2),
+    queuePollMs: Number(process.env.QUEUE_POLL_MS ?? 250),
+    queueLeaseMs: Number(process.env.QUEUE_LEASE_MS ?? 30000),
     retentionDays: Number(process.env.RETENTION_DAYS ?? 30),
     redactIps: toBoolean(process.env.REDACT_IPS, true),
     redactDirectIdentifiers: toBoolean(process.env.REDACT_DIRECT_IDENTIFIERS, true),

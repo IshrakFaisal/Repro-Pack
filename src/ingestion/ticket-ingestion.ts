@@ -66,6 +66,29 @@ export function normalizeSupportTicket(rawTicket: unknown): SupportTicket {
       ...asStringArray(raw.agentNotes),
       ...asStringArray(raw.internalNotes)
     ],
+    tags: asStringArray(raw.tags),
+    status: asString(raw.status),
+    customFields:
+      typeof raw.customFields === "object" && raw.customFields !== null
+        ? (raw.customFields as Record<string, unknown>)
+        : typeof raw.custom_fields === "object" && raw.custom_fields !== null
+          ? (raw.custom_fields as Record<string, unknown>)
+          : {},
+    requester:
+      typeof raw.requester === "object" && raw.requester !== null
+        ? {
+            id: asString((raw.requester as Record<string, unknown>).id),
+            name: asString((raw.requester as Record<string, unknown>).name),
+            email: asString((raw.requester as Record<string, unknown>).email)
+          }
+        : undefined,
+    organization:
+      typeof raw.organization === "object" && raw.organization !== null
+        ? {
+            id: asString((raw.organization as Record<string, unknown>).id),
+            name: asString((raw.organization as Record<string, unknown>).name)
+          }
+        : undefined,
     severity: asString(raw.severity),
     priority: asString(raw.priority),
     expectedBehavior: asString(raw.expectedBehavior),

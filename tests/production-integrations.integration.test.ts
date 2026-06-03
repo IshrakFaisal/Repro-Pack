@@ -18,7 +18,7 @@ type JiraIssue = {
   self: string;
   fields: {
     summary: string;
-    description: string;
+    description: unknown;
     labels: string[];
   };
 };
@@ -463,7 +463,7 @@ describe("production integration workflow", () => {
     expect(packResponse.statusCode).toBe(200);
     expect(packResponse.json().issueLinks).toHaveLength(2);
     expect(mockState.githubIssues[0]?.body).not.toContain("context-token");
-    expect(mockState.jiraIssues[0]?.fields.description).toContain("repro-pack:jira:acme:zendesk-123");
+    expect(JSON.stringify(mockState.jiraIssues[0]?.fields.description)).toContain("repro-pack:jira:acme:zendesk-123");
   });
 
   it("returns a clean failure when a tenant config is missing", async () => {

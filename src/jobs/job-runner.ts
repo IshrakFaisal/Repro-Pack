@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { AppConfig } from "../config/env";
+import type { MetricsRegistry } from "../observability/metrics";
 import type { ProcessRequestInput, ProviderRegistry } from "../providers/interfaces";
 import type { ProcessingJob, StoredReproPack } from "../types/schemas";
 import { ReproStore } from "../persistence/store";
@@ -9,22 +11,38 @@ type MinimalLogger = {
   error: (obj: unknown, message?: string) => void;
 };
 
-type QueueItem = {
-  jobId: string;
-  input: ProcessRequestInput;
-};
-
 export class JobRunner {
-  private readonly queue: QueueItem[] = [];
   private isRunning = false;
+  private pollTimer?: NodeJS.Timeout;
 
   constructor(
     private readonly providers: ProviderRegistry,
     private readonly store: ReproStore,
-    private readonly logger: MinimalLogger
+    private readonly logger: MinimalLogger,
+    private readonly metrics: MetricsRegistry,
+    private readonly config: AppConfig
   ) {}
 
-  async enqueue(input: ProcessRequestInput): Promise<ProcessingJob> {
+  async start(): Promise<void> {
+    if (this.pollTimer) {
+      return;
+    }
+
+    this.pollTimer = setInterval(() => {
+      void this.drain();
+    }, this.config.queuePollMs);
+
+    await this.drain();
+  }
+
+  async stop(): Promise<void> {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = undefined;
+    }
+  }
+
+  async enqueue(input: ProcessRequestInput & { actor?: ProcessingJob["actor"] }): Promise<ProcessingJob> {
     const tenantId = input.tenantId ?? "default";
     const timestamp = new Date().toISOString();
     const job: ProcessingJob = {
@@ -35,27 +53,19 @@ export class JobRunner {
       tenantId,
       dryRun: Boolean(input.dryRun),
       writeArtifacts: Boolean(input.writeArtifacts),
+      attempts: 0,
       sourceLookup: {
         fixtureId: input.fixtureId,
         ticketPath: input.ticketPath,
         supportTicketId: input.supportTicketId
-      }
+      },
+      actor: input.actor
     };
 
     await this.store.saveJob(job);
-    this.queue.push({ jobId: job.jobId, input });
-    this.schedule();
+    this.metrics.increment("repro_queue_jobs_total", "Queue jobs created", { status: "queued", tenant_id: tenantId });
+    void this.drain();
     return job;
-  }
-
-  private schedule(): void {
-    if (this.isRunning) {
-      return;
-    }
-
-    setImmediate(() => {
-      void this.drain();
-    });
   }
 
   private async drain(): Promise<void> {
@@ -64,43 +74,43 @@ export class JobRunner {
     }
 
     this.isRunning = true;
-    while (this.queue.length > 0) {
-      const next = this.queue.shift();
-      if (!next) {
-        continue;
-      }
+    try {
+      while (true) {
+        const next = await this.store.claimNextJob();
+        if (!next) {
+          break;
+        }
 
-      await this.runJob(next);
+        await this.runJob(next);
+      }
+    } finally {
+      this.isRunning = false;
     }
-    this.isRunning = false;
   }
 
-  private async runJob(item: QueueItem): Promise<void> {
-    const existing = await this.store.getJob(item.jobId, item.input.tenantId ?? "default");
-    if (!existing) {
-      return;
-    }
-
-    const runningJob: ProcessingJob = {
-      ...existing,
+  private async runJob(job: ProcessingJob): Promise<void> {
+    this.logger.info({ event: "job.started", jobId: job.jobId, tenantId: job.tenantId }, "Started queued job");
+    this.metrics.increment("repro_queue_jobs_total", "Queue jobs processed", {
       status: "running",
-      updatedAt: new Date().toISOString()
-    };
-    await this.store.saveJob(runningJob);
-    this.logger.info({ event: "job.started", jobId: item.jobId });
+      tenant_id: job.tenantId
+    });
 
     try {
-      const providerSet = await this.providers.create({ tenantId: item.input.tenantId });
-      const result = await processTicket(item.input, providerSet, this.logger);
+      const providerSet = await this.providers.create({ tenantId: job.tenantId });
+      const input: ProcessRequestInput = {
+        tenantId: job.tenantId,
+        dryRun: job.dryRun,
+        writeArtifacts: job.writeArtifacts,
+        fixtureId: job.sourceLookup.fixtureId,
+        ticketPath: job.sourceLookup.ticketPath,
+        supportTicketId: job.sourceLookup.supportTicketId
+      };
+      const result = await processTicket(input, providerSet, this.logger, this.metrics);
       await this.store.upsertPack({
-        tenantId: item.input.tenantId ?? "default",
+        tenantId: job.tenantId,
         ticketId: result.ticket.ticketId,
         dryRun: result.dryRun,
-        sourceLookup: {
-          fixtureId: item.input.fixtureId,
-          ticketPath: item.input.ticketPath,
-          supportTicketId: item.input.supportTicketId
-        },
+        sourceLookup: job.sourceLookup,
         reproPack: result.reproPack,
         issueDraft: result.issueDraft,
         markdown: result.markdown,
@@ -113,21 +123,46 @@ export class JobRunner {
       });
 
       await this.store.saveJob({
-        ...runningJob,
+        ...job,
         status: "succeeded",
         updatedAt: new Date().toISOString(),
-        ticketId: result.ticket.ticketId
+        ticketId: result.ticket.ticketId,
+        leaseExpiresAt: undefined
       });
-      this.logger.info({ event: "job.completed", jobId: item.jobId, ticketId: result.ticket.ticketId });
+      await this.store.recordAuditEvent({
+        tenantId: job.tenantId,
+        ticketId: result.ticket.ticketId,
+        action: "job.completed",
+        outcome: "success",
+        actor: job.actor,
+        metadata: { jobId: job.jobId, attempts: job.attempts }
+      });
+      this.metrics.increment("repro_queue_jobs_total", "Queue jobs processed", {
+        status: "succeeded",
+        tenant_id: job.tenantId
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown job failure";
       await this.store.saveJob({
-        ...runningJob,
+        ...job,
         status: "failed",
         updatedAt: new Date().toISOString(),
+        leaseExpiresAt: undefined,
         error: message
       });
-      this.logger.error({ event: "job.failed", jobId: item.jobId, error: message });
+      await this.store.recordAuditEvent({
+        tenantId: job.tenantId,
+        ticketId: job.ticketId,
+        action: "job.failed",
+        outcome: "error",
+        actor: job.actor,
+        metadata: { jobId: job.jobId, error: message }
+      });
+      this.logger.error({ event: "job.failed", jobId: job.jobId, error: message });
+      this.metrics.increment("repro_queue_jobs_total", "Queue jobs processed", {
+        status: "failed",
+        tenant_id: job.tenantId
+      });
     }
   }
 

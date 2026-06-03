@@ -3,43 +3,53 @@
   "name": "Example Tenant",
   "redactDirectIdentifiers": true,
   "retentionDays": 30,
+  "auth": {
+    "apiKeys": [
+      {
+        "keyId": "support-ops",
+        "actorId": "support-ops",
+        "secret": { "provider": "env", "env": "EXAMPLE_TENANT_API_KEY" },
+        "roles": ["read", "process", "review", "sync"]
+      }
+    ]
+  },
   "providers": {
     "support": {
       "type": "zendesk",
       "baseUrl": "https://example.zendesk.com",
-      "email": { "env": "ZENDESK_EMAIL" },
-      "apiToken": { "env": "ZENDESK_API_TOKEN" }
+      "email": { "provider": "env", "env": "ZENDESK_EMAIL" },
+      "apiToken": { "provider": "env", "env": "ZENDESK_API_TOKEN" }
     },
     "logs": {
       "type": "http-logs",
       "baseUrl": "https://observability.internal.example",
       "path": "/logs",
-      "bearerToken": { "env": "LOGS_API_TOKEN" }
+      "bearerToken": { "provider": "env", "env": "LOGS_API_TOKEN" }
     },
     "session": {
       "type": "http-session",
       "baseUrl": "https://replay.internal.example",
       "path": "/sessions",
-      "bearerToken": { "env": "SESSION_API_TOKEN" }
+      "bearerToken": { "provider": "env", "env": "SESSION_API_TOKEN" }
     },
     "featureFlags": {
       "type": "http-flags",
       "baseUrl": "https://flags.internal.example",
       "path": "/flags",
-      "bearerToken": { "env": "FLAGS_API_TOKEN" }
+      "bearerToken": { "provider": "env", "env": "FLAGS_API_TOKEN" }
     },
     "release": {
       "type": "http-release",
       "baseUrl": "https://deploys.internal.example",
       "path": "/release",
-      "bearerToken": { "env": "RELEASE_API_TOKEN" }
+      "bearerToken": { "provider": "env", "env": "RELEASE_API_TOKEN" }
     },
     "github": {
       "type": "github",
       "baseUrl": "https://api.github.com",
       "owner": "example-org",
       "repo": "repro-packs",
-      "token": { "env": "GITHUB_TOKEN" },
+      "token": { "provider": "env", "env": "GITHUB_TOKEN" },
       "labels": ["support", "bug", "repro-pack"]
     },
     "jira": {
@@ -47,9 +57,14 @@
       "baseUrl": "https://example.atlassian.net",
       "projectKey": "SUP",
       "issueType": "Bug",
-      "email": { "env": "JIRA_EMAIL" },
-      "apiToken": { "env": "JIRA_API_TOKEN" },
-      "labels": ["support", "repro-pack"]
+      "email": { "provider": "env", "env": "JIRA_EMAIL" },
+      "apiToken": { "provider": "env", "env": "JIRA_API_TOKEN" },
+      "labels": ["support", "repro-pack"],
+      "priority": "High",
+      "components": ["Support"],
+      "customFields": {
+        "customfield_10001": "repro-pack"
+      }
     }
   }
 }

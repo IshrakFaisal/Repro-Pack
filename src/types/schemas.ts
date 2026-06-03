@@ -25,6 +25,22 @@ export const SupportTicketSchema = z.object({
   timestamps: TimestampFieldsSchema.default({}),
   attachments: z.array(AttachmentSchema).default([]),
   supportAgentNotes: z.array(z.string()).default([]),
+  tags: z.array(z.string()).default([]),
+  status: z.string().optional(),
+  customFields: z.record(z.unknown()).default({}),
+  requester: z
+    .object({
+      id: z.string().optional(),
+      name: z.string().optional(),
+      email: z.string().optional()
+    })
+    .optional(),
+  organization: z
+    .object({
+      id: z.string().optional(),
+      name: z.string().optional()
+    })
+    .optional(),
   severity: z.string().optional(),
   priority: z.string().optional(),
   expectedBehavior: z.string().optional(),
@@ -233,6 +249,8 @@ export const ProcessingJobSchema = z.object({
   tenantId: z.string().default("default"),
   dryRun: z.boolean(),
   writeArtifacts: z.boolean(),
+  attempts: z.number().int().nonnegative().default(0),
+  leaseExpiresAt: z.string().optional(),
   ticketId: z.string().optional(),
   sourceLookup: z
     .object({
@@ -241,6 +259,13 @@ export const ProcessingJobSchema = z.object({
       supportTicketId: z.string().optional()
     })
     .default({}),
+  actor: z
+    .object({
+      actorId: z.string(),
+      authMethod: z.string(),
+      roles: z.array(z.string()).default([])
+    })
+    .optional(),
   error: z.string().optional()
 });
 

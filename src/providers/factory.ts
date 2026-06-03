@@ -1,5 +1,7 @@
 import { TenantConfigStore } from "../config/tenant-config";
 import type { AppConfig } from "../config/env";
+import type { MetricsRegistry } from "../observability/metrics";
+import type { SecretManager } from "../secrets/manager";
 import type { FeatureFlagContext, LogsContext, ProviderResultOf, ReleaseInfo, SessionContext, SupportTicket } from "../types/schemas";
 import type { ProviderRegistry, ProviderSet } from "./interfaces";
 import {
@@ -79,8 +81,12 @@ class UnavailableReleaseProvider {
 export class AppProviderRegistry implements ProviderRegistry {
   private readonly tenantConfigStore: TenantConfigStore;
 
-  constructor(private readonly config: AppConfig) {
-    this.tenantConfigStore = new TenantConfigStore(config);
+  constructor(
+    private readonly config: AppConfig,
+    secretManager: SecretManager,
+    private readonly metrics?: MetricsRegistry
+  ) {
+    this.tenantConfigStore = new TenantConfigStore(config, secretManager);
   }
 
   async create(input?: { tenantId?: string }): Promise<ProviderSet> {
@@ -99,7 +105,7 @@ export class AppProviderRegistry implements ProviderRegistry {
       };
     }
 
-    const client = createHttpClient(this.config);
+    const client = createHttpClient(this.config, this.metrics);
 
     return {
       config: this.config,
@@ -121,6 +127,10 @@ export class AppProviderRegistry implements ProviderRegistry {
   }
 }
 
-export function createProviderRegistry(config: AppConfig): ProviderRegistry {
-  return new AppProviderRegistry(config);
+export function createProviderRegistry(
+  config: AppConfig,
+  secretManager: SecretManager,
+  metrics?: MetricsRegistry
+): ProviderRegistry {
+  return new AppProviderRegistry(config, secretManager, metrics);
 }

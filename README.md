@@ -1,37 +1,24 @@
 # Support Ticket -> Repro Pack
 
-Production-oriented TypeScript service that turns support tickets into developer-ready repro packs with normalized evidence, deterministic sanitization, repro steps, confidence scoring, review workflow, and idempotent GitHub/Jira issue sync.
+Production-ready TypeScript service for turning support tickets into developer-ready repro packs with sanitized evidence, reproducible context, review workflow, and idempotent GitHub/Jira sync.
 
-## What This Project Does
+## What changed
 
-- Ingests support tickets from fixture input, direct payloads, or real Zendesk ticket ids
-- Enriches tickets with logs, session replay, feature flag, and release/deploy context
-- Normalizes evidence into a consistent internal schema
-- Redacts sensitive data before issue drafting or external sync
-- Produces JSON repro packs and Markdown issue drafts
-- Supports dry-run previews before any external write
-- Persists jobs, provider results, review history, issue links, and audit events
-- Syncs approved issues to GitHub and Jira with idempotent update behavior
+This repo now supports:
 
-## Current Integration Support
-
-### Real adapters
-
-- Zendesk ticket ingestion
-- GitHub issue create/update
-- Jira issue create/update
-- Generic HTTP observability/log provider
-- Generic HTTP session replay provider
-- Generic HTTP feature flag provider
-- Generic HTTP release/deploy provider
-
-### Local adapters
-
-- Fixture-based ticket and context providers for deterministic testing and local development
+- fixture and direct-input local development
+- real Zendesk ingestion
+- real GitHub and Jira sync adapters
+- generic HTTP adapters for logs, session replay, feature flags, and release metadata
+- tenant-aware auth and access control
+- durable async job processing with restart recovery
+- pluggable persistence with filesystem and SQLite backends
+- secrets-manager abstraction with env-backed resolution by default
+- audit logging, retention cleanup, health endpoints, and metrics
 
 ## Architecture
 
-The existing pipeline remains intact and is now wrapped by a production integration layer:
+The main pipeline is unchanged:
 
 1. `ticket-ingestion`
 2. `context-enrichment`
@@ -40,46 +27,41 @@ The existing pipeline remains intact and is now wrapped by a production integrat
 5. `repro-step-generator`
 6. `confidence-scorer`
 7. `issue-assembler`
-8. `persistence + audit logging + external issue sync`
 
-Key directories:
+Production seams added around that pipeline:
 
-```text
-src/
-  assembly/        issue and artifact assembly
-  cli/             local operator commands
-  config/          app config + tenant config resolution
-  enrichment/      provider orchestration
-  ingestion/       support ticket normalization
-  issues/          GitHub/Jira sync orchestration
-  jobs/            async job execution
-  normalization/   evidence normalization
-  persistence/     filesystem-backed state store
-  pipeline/        end-to-end processing
-  providers/       fixture + production adapters
-  repro/           repro step generation
-  runtime/         runtime composition
-  sanitizer/       deterministic redaction
-  scoring/         confidence model
-  server/          Fastify API
-  types/           schemas and integration config
-tests/             unit and integration coverage
-fixtures/          fixture tickets and golden outputs
-tenants/           tenant config files
-```
+- `src/auth`: tenant-aware auth and role checks
+- `src/jobs`: durable queue polling and worker execution
+- `src/persistence`: storage backend interface plus filesystem and SQLite implementations
+- `src/providers`: fixture adapters and real integration adapters
+- `src/secrets`: secret-manager abstraction
+- `src/observability`: metrics and error classification
 
-## Quick Start
+## Local run
 
 ```bash
 corepack pnpm install
 copy .env.example .env
-corepack pnpm check
+corepack pnpm typecheck
+corepack pnpm test
 corepack pnpm dev
 ```
 
-## Environment Variables
+Local fixture processing:
 
-Core app configuration:
+```bash
+corepack pnpm cli -- process --ticket backend-trace-correlation --dry-run
+```
+
+Local async processing:
+
+```bash
+corepack pnpm cli -- process --ticket feature-flag-regression --dry-run --async
+```
+
+## Environment variables
+
+Core runtime:
 
 - `PORT`
 - `LOG_LEVEL`
@@ -87,9 +69,13 @@ Core app configuration:
 - `ARTIFACT_OUTPUT_DIR`
 - `DATA_ROOT`
 - `TENANT_CONFIG_ROOT`
+- `STORAGE_DRIVER`
+- `SQLITE_DATABASE_PATH`
 - `PROCESS_TIMEOUT_MS`
 - `HTTP_TIMEOUT_MS`
 - `MAX_PROVIDER_RETRIES`
+- `QUEUE_POLL_MS`
+- `QUEUE_LEASE_MS`
 - `RETENTION_DAYS`
 - `REDACT_IPS`
 - `REDACT_DIRECT_IDENTIFIERS`
@@ -97,37 +83,39 @@ Core app configuration:
 - `BUILD_HASH`
 - `API_KEY`
 
-Provider credentials are referenced indirectly from tenant config files using environment variable names, for example:
+Provider and tenant secrets are referenced from tenant config files and resolved at runtime. The shipped default is env-backed secret resolution.
 
-- `ZENDESK_EMAIL`
-- `ZENDESK_API_TOKEN`
-- `GITHUB_TOKEN`
-- `JIRA_EMAIL`
-- `JIRA_API_TOKEN`
+## Tenant configuration
 
-The tenant config never needs to contain raw secrets.
+See [tenants/example-tenant.json](C:\Users\USER\OneDrive\Desktop\New folder\Coding\Project no 2\tenants\example-tenant.json).
 
-## Tenant Configuration
+Tenant config can define:
 
-Create one JSON file per tenant under `TENANT_CONFIG_ROOT`, for example [tenants/example-tenant.json](C:\Users\USER\OneDrive\Desktop\New folder\Coding\Project no 2\tenants\example-tenant.json).
+- `auth.apiKeys`
+- `providers.support`
+- `providers.logs`
+- `providers.session`
+- `providers.featureFlags`
+- `providers.release`
+- `providers.github`
+- `providers.jira`
 
-Example capabilities:
+Example secret ref:
 
-- `support`: Zendesk adapter
-- `logs`: generic HTTP log provider
-- `session`: generic HTTP session provider
-- `featureFlags`: generic HTTP feature flag provider
-- `release`: generic HTTP release provider
-- `github`: GitHub issue sync
-- `jira`: Jira issue sync
+```json
+{ "provider": "env", "env": "GITHUB_TOKEN" }
+```
 
 ## API
 
-### Public
+Public endpoints:
 
 - `GET /health`
+- `GET /health/live`
+- `GET /health/ready`
+- `GET /metrics`
 
-### Protected when `API_KEY` is configured
+Protected endpoints:
 
 - `POST /tickets/process`
 - `GET /jobs/:id`
@@ -138,129 +126,92 @@ Example capabilities:
 - `POST /issues/:ticketId/export`
 - `GET /debug/ticket/:id`
 
-Use the `x-api-key` header on protected routes.
+Auth options:
 
-### Process a Zendesk ticket
-
-```json
-{
-  "tenantId": "acme",
-  "supportTicketId": "12345",
-  "dryRun": true
-}
-```
-
-### Preview issue sync without writing
-
-```json
-{
-  "tenantId": "acme",
-  "dryRun": true,
-  "targets": ["github", "jira"]
-}
-```
-
-### Perform idempotent issue sync
-
-```json
-{
-  "tenantId": "acme",
-  "dryRun": false,
-  "targets": ["github", "jira"]
-}
-```
+- global `API_KEY` for local/dev fallback
+- tenant-scoped API keys from tenant config for production use
 
 ## CLI
 
-Process a local fixture:
+Fixture:
 
 ```bash
-corepack pnpm cli -- process --ticket backend-trace-correlation --dry-run
+corepack pnpm cli -- process --ticket browser-only-complaint --dry-run
 ```
 
-Process a Zendesk ticket for a tenant:
+Zendesk:
 
 ```bash
 corepack pnpm cli -- process --tenant acme --support-ticket-id 12345 --dry-run
 ```
 
-Approve a stored pack:
+Approve:
 
 ```bash
-corepack pnpm cli -- review --tenant acme --ticket zendesk-12345 --status approved --reviewer qa@example.test --note "Evidence verified"
+corepack pnpm cli -- review --tenant acme --ticket zendesk-12345 --status approved --reviewer support-ops
 ```
 
-Preview external sync:
+Preview sync:
 
 ```bash
 corepack pnpm cli -- sync-issues --tenant acme --ticket zendesk-12345
 ```
 
-Write to GitHub and Jira:
+Write sync:
 
 ```bash
 corepack pnpm cli -- sync-issues --tenant acme --ticket zendesk-12345 --write
 ```
 
-## Idempotency
+## Production deployment
 
-External issue writes are designed to be repeat-safe:
+Recommended baseline:
 
-- issue sync stores `issueLinks` per ticket and target
-- repeated syncs update existing GitHub/Jira issues instead of creating duplicates
-- hidden repro-pack markers are embedded into synced issue bodies/descriptions to help re-discovery
+1. Set `STORAGE_DRIVER=sqlite` and mount durable storage for `SQLITE_DATABASE_PATH`.
+2. Put the API behind HTTPS and an internal gateway.
+3. Use tenant-scoped API keys instead of relying only on global `API_KEY`.
+4. Keep tenant configs in a controlled deploy artifact or mounted config directory.
+5. Inject provider secrets via env vars now, or plug in a real secrets manager.
+6. Use async processing for real provider workflows.
 
-## Persistence and Retention
+Operational details are in [docs/production-runbook.md](C:\Users\USER\OneDrive\Desktop\New folder\Coding\Project no 2\docs\production-runbook.md).
 
-State is persisted under `DATA_ROOT`:
+## Idempotency and safety
 
-- `jobs/`: async processing jobs
-- `packs/`: stored repro packs and provider results
-- `issues/`: exported Markdown issue drafts
-- `audit/`: audit events for processing, review, and issue sync
-
-Retention cleanup runs during store initialization and removes stale data older than `RETENTION_DAYS`.
-
-## Security Model
-
-- Raw secrets are resolved from environment variables, not tenant config files
-- All external issue sync flows use already-sanitized issue drafts
-- Protected endpoints require `API_KEY` when configured
-- Sanitization remains deterministic and reportable
-- Audit logs record operational actions without logging raw credentials
+- External issue sync only uses sanitized issue drafts.
+- GitHub sync re-discovers issues by stored link, marker search, and fallback list scan.
+- Jira sync re-discovers issues by stored link and marker search.
+- Dry-run remains the default safe review flow.
+- Audit events are recorded for processing, review, sync, auth failures, and request/config errors.
 
 ## Testing
 
-Run the full suite:
+Standard checks:
 
 ```bash
+corepack pnpm typecheck
 corepack pnpm test
 ```
 
-Run build + tests:
+The suite covers:
 
-```bash
-corepack pnpm check
-```
+- normalization and sanitization
+- markdown/json artifact generation
+- local HTTP and async job flows
+- real-adapter style integration tests with mocked Zendesk/GitHub/Jira backends
+- tenant auth behavior
+- durable job recovery
+- optional sandbox test scaffolding when real env vars are present
 
-The integration suite now covers:
+## Extending providers
 
-- fixture-based local processing
-- production-like Zendesk + GitHub + Jira adapters
-- rate-limit retry handling
-- tenant config resolution
-- idempotent issue sync behavior
-- protected API routes
+- Add or update a provider in [src/providers/interfaces.ts](C:\Users\USER\OneDrive\Desktop\New folder\Coding\Project no 2\src\providers\interfaces.ts)
+- Implement the adapter under [src/providers](C:\Users\USER\OneDrive\Desktop\New folder\Coding\Project no 2\src\providers)
+- Register it in [src/providers/factory.ts](C:\Users\USER\OneDrive\Desktop\New folder\Coding\Project no 2\src\providers\factory.ts)
+- Extend the tenant config schema in [src/types/integrations.ts](C:\Users\USER\OneDrive\Desktop\New folder\Coding\Project no 2\src\types\integrations.ts)
 
-## Deployment Notes
+## Current limits
 
-Recommended production setup:
-
-- run behind a private network or authenticated internal gateway
-- set `API_KEY`
-- mount persistent storage for `DATA_ROOT`
-- inject provider credentials via environment variables or a secrets manager
-- define one tenant file per customer/workspace under `TENANT_CONFIG_ROOT`
-- monitor audit logs and storage retention
-
-For higher-scale deployment, the next step would be replacing filesystem persistence with a database and moving background jobs to a dedicated queue/worker model.
+- SQLite is the included production-ready storage backend; large multi-instance deployments should swap in a shared database backend behind the storage interface.
+- The queue is durable and restart-safe but still in-process; distributed workers would be a next step for horizontal scale.
+- Cloud secret managers are adapter boundaries today, not bundled SDK integrations.

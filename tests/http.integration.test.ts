@@ -27,12 +27,18 @@ describe("http endpoints", () => {
   it("reports health metadata without auth", async () => {
     const app = await createApp();
     const response = await app.inject({ method: "GET", url: "/health" });
+    const liveResponse = await app.inject({ method: "GET", url: "/health/live" });
+    const readyResponse = await app.inject({ method: "GET", url: "/health/ready" });
+    const metricsResponse = await app.inject({ method: "GET", url: "/metrics" });
     await app.close();
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       status: "ok"
     });
+    expect(liveResponse.statusCode).toBe(200);
+    expect(readyResponse.statusCode).toBe(200);
+    expect(metricsResponse.statusCode).toBe(200);
   });
 
   it("rejects protected routes without the configured API key", async () => {

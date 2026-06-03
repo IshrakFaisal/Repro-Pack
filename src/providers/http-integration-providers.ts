@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { URL } from "node:url";
 import type { AppConfig } from "../config/env";
+import type { MetricsRegistry } from "../observability/metrics";
 import type { IssueLink, IssueTarget, ResolvedTenantConfig } from "../types/integrations";
 import {
   FeatureFlagContextSchema,
@@ -87,6 +88,14 @@ async function withProviderResult<T>(
   }
 }
 
+async function optionalRequest<T>(loader: () => Promise<{ data: T }>, fallback: T): Promise<T> {
+  try {
+    return (await loader()).data;
+  } catch {
+    return fallback;
+  }
+}
+
 function appendQueryParams(url: URL, ticket: SupportTicket): URL {
   url.searchParams.set("ticketId", ticket.ticketId);
   if (ticket.userId) {
@@ -99,6 +108,39 @@ function appendQueryParams(url: URL, ticket: SupportTicket): URL {
     url.searchParams.set("workspaceId", ticket.workspaceId);
   }
   return url;
+}
+
+function safeAttachment(input: Record<string, unknown>) {
+  return {
+    name: String(input.file_name ?? input.name ?? "attachment"),
+    type: String(input.content_type ?? input.type ?? "unknown"),
+    url: typeof input.content_url === "string" ? input.content_url : typeof input.url === "string" ? input.url : undefined,
+    description:
+      typeof input.size === "number"
+        ? `attachment size=${input.size}`
+        : typeof input.description === "string"
+          ? input.description
+          : undefined
+  };
+}
+
+function toJiraDocument(text: string, marker: string) {
+  const lines = `${text}\n\n${marker}`.split("\n");
+  return {
+    version: 1,
+    type: "doc",
+    content: lines.map((line) => ({
+      type: "paragraph",
+      content: line
+        ? [
+            {
+              type: "text",
+              text: line
+            }
+          ]
+        : []
+    }))
+  };
 }
 
 export class ZendeskSupportProvider implements SupportProvider {
@@ -124,35 +166,115 @@ export class ZendeskSupportProvider implements SupportProvider {
       basicEmail: `${config.email ?? ""}/token`,
       basicToken: config.apiToken
     });
-    const response = await this.client.request<{ ticket: unknown }>(
+    const ticketResponse = await this.client.request<{ ticket: Record<string, unknown> }>(
       `${config.baseUrl.replace(/\/$/, "")}/api/v2/tickets/${lookup.supportTicketId}.json`,
       { headers }
     );
+    const rawTicket = ticketResponse.data.ticket;
+    const [commentsResponse, auditsResponse, requesterResponse, organizationResponse] = await Promise.all([
+      optionalRequest(
+        () =>
+          this.client.request<{ comments?: Array<Record<string, unknown>> }>(
+            `${config.baseUrl.replace(/\/$/, "")}/api/v2/tickets/${lookup.supportTicketId}/comments.json`,
+            { headers }
+          ),
+        {}
+      ),
+      optionalRequest(
+        () =>
+          this.client.request<{ audits?: Array<Record<string, unknown>> }>(
+            `${config.baseUrl.replace(/\/$/, "")}/api/v2/tickets/${lookup.supportTicketId}/audits.json`,
+            { headers }
+          ),
+        {}
+      ),
+      rawTicket.requester_id
+        ? optionalRequest(
+            () =>
+              this.client.request<{ user?: Record<string, unknown> }>(
+                `${config.baseUrl.replace(/\/$/, "")}/api/v2/users/${String(rawTicket.requester_id)}.json`,
+                { headers }
+              ),
+            {}
+          )
+        : Promise.resolve({} as { user?: Record<string, unknown> }),
+      rawTicket.organization_id
+        ? optionalRequest(
+            () =>
+              this.client.request<{ organization?: Record<string, unknown> }>(
+                `${config.baseUrl.replace(/\/$/, "")}/api/v2/organizations/${String(rawTicket.organization_id)}.json`,
+                { headers }
+              ),
+            {}
+          )
+        : Promise.resolve({} as { organization?: Record<string, unknown> })
+    ]);
 
-    const rawTicket = response.data.ticket;
+    const comments = commentsResponse.comments ?? [];
+    const attachments = comments.flatMap((comment) =>
+      Array.isArray(comment.attachments)
+        ? comment.attachments
+            .filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null)
+            .map((entry) => safeAttachment(entry))
+        : []
+    );
+    const auditEvents = (auditsResponse.audits ?? []).map((audit) => ({
+      id: String(audit.id ?? ""),
+      created_at: audit.created_at,
+      events: Array.isArray(audit.events) ? audit.events : []
+    }));
+    const customFields = Array.isArray(rawTicket.custom_fields)
+      ? Object.fromEntries(
+          rawTicket.custom_fields
+            .filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null && "id" in entry)
+            .map((entry) => [String(entry.id), entry.value ?? null])
+        )
+      : {};
+
     return normalizeSupportTicket({
       ticketId: `zendesk-${lookup.supportTicketId}`,
-      complaintText:
-        (rawTicket as Record<string, unknown>).description ??
-        (rawTicket as Record<string, unknown>).subject ??
-        "not available",
-      userId: (rawTicket as Record<string, unknown>).requester_id?.toString(),
-      accountId: (rawTicket as Record<string, unknown>).organization_id?.toString(),
-      workspaceId: (rawTicket as Record<string, unknown>).group_id?.toString(),
-      severity: (rawTicket as Record<string, unknown>).priority?.toString(),
-      priority: (rawTicket as Record<string, unknown>).priority?.toString(),
+      complaintText: String(rawTicket.description ?? rawTicket.subject ?? "not available"),
+      userId: rawTicket.requester_id?.toString(),
+      accountId: rawTicket.organization_id?.toString(),
+      workspaceId: rawTicket.group_id?.toString(),
+      severity: rawTicket.priority?.toString(),
+      priority: rawTicket.priority?.toString(),
+      status: rawTicket.status?.toString(),
       timestamps: {
-        createdAt: (rawTicket as Record<string, unknown>).created_at?.toString(),
-        updatedAt: (rawTicket as Record<string, unknown>).updated_at?.toString()
+        createdAt: rawTicket.created_at?.toString(),
+        updatedAt: rawTicket.updated_at?.toString()
       },
-      supportAgentNotes: Array.isArray((rawTicket as Record<string, unknown>).tags)
-        ? ((rawTicket as Record<string, unknown>).tags as unknown[]).map((entry) => String(entry))
-        : [],
+      attachments,
+      tags: Array.isArray(rawTicket.tags) ? rawTicket.tags.map((entry) => String(entry)) : [],
+      supportAgentNotes: comments.map((comment) => String(comment.plain_body ?? comment.body ?? "not available")),
+      customFields,
+      requester: requesterResponse.user
+        ? {
+            id: requesterResponse.user.id?.toString(),
+            name: requesterResponse.user.name?.toString(),
+            email: requesterResponse.user.email?.toString()
+          }
+        : undefined,
+      organization: organizationResponse.organization
+        ? {
+            id: organizationResponse.organization.id?.toString(),
+            name: organizationResponse.organization.name?.toString()
+          }
+        : undefined,
       source: {
         platform: "zendesk",
         externalId: lookup.supportTicketId
       },
-      rawSource: rawTicket as Record<string, unknown>
+      rawSource: {
+        ticket: rawTicket,
+        comments: comments.map((comment) => ({
+          id: comment.id,
+          author_id: comment.author_id,
+          public: comment.public,
+          created_at: comment.created_at
+        })),
+        audits: auditEvents
+      }
     });
   }
 }
@@ -263,6 +385,23 @@ function buildIssueBody(issueDraft: IssueDraft, marker: string): string {
   return `${issueDraft.body}\n\n<!-- ${marker} -->\n`;
 }
 
+function mergeLabels(existing: unknown, desired: string[]): string[] {
+  const existingValues = Array.isArray(existing)
+    ? existing
+        .map((entry) => {
+          if (typeof entry === "string") {
+            return entry;
+          }
+          if (entry && typeof entry === "object" && "name" in entry) {
+            return String((entry as { name: unknown }).name);
+          }
+          return undefined;
+        })
+        .filter((entry): entry is string => Boolean(entry))
+    : [];
+  return [...new Set([...existingValues, ...desired])];
+}
+
 export class GitHubIssueTracker implements IssueTrackerProvider {
   readonly name = "github-issues";
   readonly target = "github" as const;
@@ -300,6 +439,7 @@ export class GitHubIssueTracker implements IssueTrackerProvider {
     const externalKey = `${config.owner}/${config.repo}#${marker}`;
     const body = buildIssueBody(input.issueDraft, marker);
     const idempotencyKey = `github:${input.tenantId}:${input.ticket.ticketId}`;
+    const existingExternalId = input.existingLink?.externalId;
 
     if (input.dryRun) {
       return {
@@ -312,31 +452,51 @@ export class GitHubIssueTracker implements IssueTrackerProvider {
       };
     }
 
-    const listUrl = `${config.baseUrl.replace(/\/$/, "")}/repos/${config.owner}/${config.repo}/issues?state=all`;
-    const existingIssues = await this.client.request<Array<{ number: number; html_url?: string; body?: string }>>(listUrl, {
-      headers: this.headers()
-    });
-    const match =
-      input.existingLink?.externalId !== undefined
-        ? existingIssues.data.find((issue) => String(issue.number) === input.existingLink?.externalId)
-        : existingIssues.data.find((issue) => issue.body?.includes(marker));
+    const searchMatch = await optionalRequest(
+      () =>
+        this.client.request<{ items?: Array<{ number: number; html_url?: string; body?: string; labels?: unknown }> }>(
+          `${config.baseUrl.replace(/\/$/, "")}/search/issues?q=${encodeURIComponent(`repo:${config.owner}/${config.repo} is:issue "${marker}"`)}`,
+          { headers: this.headers() }
+        ),
+      undefined
+    );
+    const match = existingExternalId
+      ? await optionalRequest(
+          () =>
+            this.client.request<{ number: number; html_url?: string; body?: string; labels?: unknown }>(
+              `${config.baseUrl.replace(/\/$/, "")}/repos/${config.owner}/${config.repo}/issues/${existingExternalId}`,
+              { headers: this.headers() }
+            ),
+          undefined
+        )
+      : searchMatch?.items?.[0];
+    const fallbackMatch =
+      match ??
+      (await optionalRequest(
+        () =>
+          this.client.request<Array<{ number: number; html_url?: string; body?: string; labels?: unknown }>>(
+            `${config.baseUrl.replace(/\/$/, "")}/repos/${config.owner}/${config.repo}/issues?state=all`,
+            { headers: this.headers() }
+          ),
+        []
+      )).find((issue) => issue.body?.includes(marker) || String(issue.number) === existingExternalId);
 
-    if (match) {
-      const updateUrl = `${config.baseUrl.replace(/\/$/, "")}/repos/${config.owner}/${config.repo}/issues/${match.number}`;
+    if (fallbackMatch) {
+      const updateUrl = `${config.baseUrl.replace(/\/$/, "")}/repos/${config.owner}/${config.repo}/issues/${fallbackMatch.number}`;
       await this.client.request(updateUrl, {
         method: "PATCH",
         headers: this.headers(),
         body: {
           title: input.issueDraft.title,
           body,
-          labels: config.labels
+          labels: mergeLabels(fallbackMatch.labels, config.labels)
         }
       });
       return {
         target: this.target,
-        externalId: String(match.number),
+        externalId: String(fallbackMatch.number),
         externalKey,
-        url: match.html_url,
+        url: fallbackMatch.html_url,
         status: "updated",
         syncedAt: nowIso(),
         idempotencyKey
@@ -347,12 +507,12 @@ export class GitHubIssueTracker implements IssueTrackerProvider {
     const created = await this.client.request<{ number: number; html_url?: string }>(createUrl, {
       method: "POST",
       headers: this.headers(),
-      body: {
-        title: input.issueDraft.title,
-        body,
-        labels: config.labels
-      }
-    });
+        body: {
+          title: input.issueDraft.title,
+          body,
+          labels: config.labels
+        }
+      });
 
     return {
       target: this.target,
@@ -403,6 +563,7 @@ export class JiraIssueTracker implements IssueTrackerProvider {
     const marker = buildMarker(this.target, input.tenantId, input.ticket.ticketId);
     const externalKey = `${config.projectKey}:${marker}`;
     const idempotencyKey = `jira:${input.tenantId}:${input.ticket.ticketId}`;
+    const existingExternalId = input.existingLink?.externalId;
 
     if (input.dryRun) {
       return {
@@ -415,28 +576,66 @@ export class JiraIssueTracker implements IssueTrackerProvider {
       };
     }
 
-    const searchUrl = `${config.baseUrl.replace(/\/$/, "")}/rest/api/3/search`;
-    const search = await this.client.request<{ issues?: Array<{ id: string; key: string; self?: string; fields?: { description?: string } }> }>(
-      searchUrl,
-      {
-        method: "POST",
-        headers: this.headers(),
-        body: {
-          jql: `project = ${config.projectKey}`,
-          maxResults: 50
-        }
-      }
+    const searchResult = await optionalRequest(
+      () =>
+        this.client.request<{ issues?: Array<{ id: string; key: string; self?: string; fields?: { labels?: string[]; description?: string } }> }>(
+          `${config.baseUrl.replace(/\/$/, "")}/rest/api/3/search`,
+          {
+            method: "POST",
+            headers: {
+              ...this.headers(),
+              accept: "application/json"
+            },
+            body: {
+              jql: `project = ${config.projectKey} AND text ~ "\"${marker}\""`,
+              maxResults: 50
+            }
+          }
+        ),
+      undefined
     );
-    const existingIssues = search.data.issues ?? [];
-    const match =
-      input.existingLink?.externalId !== undefined
-        ? existingIssues.find((issue) => issue.id === input.existingLink?.externalId || issue.key === input.existingLink?.externalId)
-        : existingIssues.find((issue) => issue.fields?.description?.includes(marker));
+    const match = existingExternalId
+      ? await optionalRequest(
+          () =>
+            this.client.request<{ id: string; key: string; self?: string; fields?: { labels?: string[] } }>(
+              `${config.baseUrl.replace(/\/$/, "")}/rest/api/3/issue/${existingExternalId}`,
+              {
+                headers: {
+                  ...this.headers(),
+                  accept: "application/json"
+                }
+              }
+            ),
+          undefined
+        )
+      : searchResult?.issues?.[0];
+    const fallbackJiraMatch =
+      match ??
+      (await optionalRequest(
+        () =>
+          this.client.request<{ issues?: Array<{ id: string; key: string; self?: string; fields?: { labels?: string[]; description?: string } }> }>(
+            `${config.baseUrl.replace(/\/$/, "")}/rest/api/3/search`,
+            {
+              method: "POST",
+              headers: {
+                ...this.headers(),
+                accept: "application/json"
+              },
+              body: {
+                jql: `project = ${config.projectKey}`,
+                maxResults: 50
+              }
+            }
+          ),
+        { issues: [] }
+      )).issues?.find(
+        (issue) => issue.id === existingExternalId || issue.key === existingExternalId || issue.fields?.description?.includes(marker)
+      );
 
-    const description = `${input.issueDraft.body}\n\n${marker}`;
+    const description = toJiraDocument(input.issueDraft.body, marker);
 
-    if (match) {
-      const updateUrl = `${config.baseUrl.replace(/\/$/, "")}/rest/api/3/issue/${match.id}`;
+    if (fallbackJiraMatch) {
+      const updateUrl = `${config.baseUrl.replace(/\/$/, "")}/rest/api/3/issue/${fallbackJiraMatch.id}`;
       await this.client.request(updateUrl, {
         method: "PUT",
         headers: this.headers(),
@@ -444,15 +643,18 @@ export class JiraIssueTracker implements IssueTrackerProvider {
           fields: {
             summary: input.issueDraft.title,
             description,
-            labels: config.labels
+            labels: mergeLabels(fallbackJiraMatch.fields?.labels, config.labels),
+            priority: config.priority ? { name: config.priority } : undefined,
+            components: config.components.map((name) => ({ name })),
+            ...config.customFields
           }
         }
       });
       return {
         target: this.target,
-        externalId: match.id,
+        externalId: fallbackJiraMatch.id,
         externalKey,
-        url: match.self,
+        url: fallbackJiraMatch.self,
         status: "updated",
         syncedAt: nowIso(),
         idempotencyKey
@@ -469,7 +671,10 @@ export class JiraIssueTracker implements IssueTrackerProvider {
           summary: input.issueDraft.title,
           description,
           issuetype: { name: config.issueType },
-          labels: config.labels
+          labels: config.labels,
+          priority: config.priority ? { name: config.priority } : undefined,
+          components: config.components.map((name) => ({ name })),
+          ...config.customFields
         }
       }
     });
@@ -486,6 +691,6 @@ export class JiraIssueTracker implements IssueTrackerProvider {
   }
 }
 
-export function createHttpClient(config: AppConfig) {
-  return new HttpJsonClient(config);
+export function createHttpClient(config: AppConfig, metrics?: MetricsRegistry) {
+  return new HttpJsonClient(config, metrics);
 }

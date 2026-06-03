@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { AppConfig } from "../config/env";
+import type { MetricsRegistry } from "../observability/metrics";
 
 type RequestOptions = {
   method?: string;
@@ -46,7 +47,10 @@ export class HttpError extends Error {
 }
 
 export class HttpJsonClient {
-  constructor(private readonly config: AppConfig) {}
+  constructor(
+    private readonly config: AppConfig,
+    private readonly metrics?: MetricsRegistry
+  ) {}
 
   async request<T>(url: string, options: RequestOptions = {}): Promise<HttpResponse<T>> {
     const timeoutMs = options.timeoutMs ?? this.config.httpTimeoutMs;
@@ -58,6 +62,7 @@ export class HttpJsonClient {
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
+        const startedAt = Date.now();
         const response = await fetch(url, {
           method: options.method ?? "GET",
           headers: {
@@ -71,10 +76,22 @@ export class HttpJsonClient {
 
         const rawText = await response.text();
         const data = rawText ? (JSON.parse(rawText) as T) : ({} as T);
+        this.metrics?.observe("repro_provider_http_latency_ms", "Provider HTTP latency in milliseconds", Date.now() - startedAt, {
+          method: options.method ?? "GET",
+          status: String(response.status)
+        });
 
         if (!response.ok) {
           lastError = new HttpError(`HTTP ${response.status} from ${url}`, response.status, rawText);
+          this.metrics?.increment("repro_provider_http_failures_total", "Provider HTTP failures", {
+            method: options.method ?? "GET",
+            status: String(response.status)
+          });
           if (attempt < retries && isRetryable(response.status)) {
+            this.metrics?.increment("repro_provider_http_retries_total", "Provider HTTP retries", {
+              method: options.method ?? "GET",
+              status: String(response.status)
+            });
             await delay(buildRetryDelay(response, attempt));
             continue;
           }
@@ -94,7 +111,15 @@ export class HttpJsonClient {
         }
 
         lastError = new HttpError(error instanceof Error ? error.message : "HTTP request failed");
+        this.metrics?.increment("repro_provider_http_failures_total", "Provider HTTP failures", {
+          method: options.method ?? "GET",
+          status: "transport"
+        });
         if (attempt < retries && isRetryable(undefined)) {
+          this.metrics?.increment("repro_provider_http_retries_total", "Provider HTTP retries", {
+            method: options.method ?? "GET",
+            status: "transport"
+          });
           await delay(buildRetryDelay(undefined, attempt));
           continue;
         }

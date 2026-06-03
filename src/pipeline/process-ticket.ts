@@ -9,6 +9,7 @@ import { scoreConfidence } from "../scoring/confidence-scorer";
 import { assembleArtifacts } from "../assembly/issue-assembler";
 import { writeJsonFile, writeTextFile } from "../utils/fs";
 import { truncate } from "../utils/text";
+import type { MetricsRegistry } from "../observability/metrics";
 import type { ProcessRequestInput, ProcessResult, ProviderSet } from "../providers/interfaces";
 
 type MinimalLogger = {
@@ -34,7 +35,8 @@ function selectSummary(evidence: Array<{ type: string; summary: string }>, compl
 export async function processTicket(
   input: ProcessRequestInput,
   providers: ProviderSet,
-  logger: MinimalLogger
+  logger: MinimalLogger,
+  metrics?: MetricsRegistry
 ): Promise<ProcessResult> {
   logger.info({ event: "ingestion.started", lookup: { fixtureId: input.fixtureId, ticketPath: input.ticketPath } });
   const ticket = await ingestTicket(input, providers);
@@ -63,6 +65,13 @@ export async function processTicket(
     ticketId: ticket.ticketId,
     actionCount: sanitizedPayload.report.length
   });
+  metrics?.increment("repro_sanitizer_runs_total", "Sanitizer runs", { tenant_id: providers.tenant?.tenantId ?? "default" });
+  metrics?.observe(
+    "repro_sanitizer_actions",
+    "Sanitizer actions per processed ticket",
+    sanitizedPayload.report.length,
+    { tenant_id: providers.tenant?.tenantId ?? "default" }
+  );
 
   const reproSteps = generateReproSteps(context, normalized);
   const confidence = ConfidenceScoreSchema.parse(
@@ -104,6 +113,7 @@ export async function processTicket(
     ticketId: ticket.ticketId,
     evidenceCount: reproPack.evidence.length
   });
+  metrics?.increment("repro_artifacts_total", "Repro pack artifacts generated", { tenant_id: providers.tenant?.tenantId ?? "default" });
 
   const artifactPaths: ProcessResult["artifactPaths"] = {};
   const shouldWriteArtifacts = Boolean(input.writeArtifacts) && !input.dryRun;

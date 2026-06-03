@@ -1,4 +1,6 @@
 import type { IssueTarget } from "../types/integrations";
+import type { AuthActor } from "../auth/auth";
+import type { MetricsRegistry } from "../observability/metrics";
 import type { ProviderSet } from "../providers/interfaces";
 import { ReproStore } from "../persistence/store";
 
@@ -9,6 +11,8 @@ export async function syncIssuesForPack(input: {
   store: ReproStore;
   targets: IssueTarget[];
   dryRun: boolean;
+  actor?: AuthActor;
+  metrics?: MetricsRegistry;
 }) {
   const pack = await input.store.getPack(input.ticketId, input.tenantId);
   if (!pack) {
@@ -26,6 +30,8 @@ export async function syncIssuesForPack(input: {
         timestamps: {},
         attachments: [],
         supportAgentNotes: [],
+        tags: [],
+        customFields: {},
         source: {}
       }
     : undefined;
@@ -69,9 +75,16 @@ export async function syncIssuesForPack(input: {
         ticketId: input.ticketId,
         action: `issue.sync.${target}`,
         outcome: "success",
+        actor: input.actor,
         metadata: { status: synced.status, externalId: synced.externalId }
       });
     }
+
+    input.metrics?.increment("repro_issue_sync_total", "External issue sync attempts", {
+      tenant_id: input.tenantId,
+      target,
+      status: synced.status
+    });
 
     results.push(synced);
   }

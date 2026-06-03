@@ -1,5 +1,4 @@
 import path from "node:path";
-import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import type { AppConfig } from "../config/env";
 import { AuditEventSchema, type AuditEvent, type IssueLink, type IssueTarget } from "../types/integrations";
@@ -15,112 +14,23 @@ import {
   type ReviewStatus,
   type StoredReproPack
 } from "../types/schemas";
-import { ensureDirectory, fileExists, readJsonFile, writeJsonFile, writeTextFile } from "../utils/fs";
+import { writeTextFile } from "../utils/fs";
+import type { PersistenceBackend } from "./backend";
 
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-function isExpired(fileTimestamp: string, retentionDays: number): boolean {
-  const ageMs = Date.now() - new Date(fileTimestamp).getTime();
-  return ageMs > retentionDays * 24 * 60 * 60 * 1000;
-}
-
 export class ReproStore {
-  private readonly jobsDir: string;
-  private readonly packsDir: string;
-  private readonly issuesDir: string;
-  private readonly auditDir: string;
-
-  constructor(private readonly config: AppConfig) {
-    this.jobsDir = path.join(config.dataRoot, "jobs");
-    this.packsDir = path.join(config.dataRoot, "packs");
-    this.issuesDir = path.join(config.dataRoot, "issues");
-    this.auditDir = path.join(config.dataRoot, "audit");
-  }
+  constructor(
+    private readonly config: AppConfig,
+    private readonly backend: PersistenceBackend
+  ) {}
 
   async initialize(): Promise<void> {
-    await Promise.all([
-      ensureDirectory(this.config.dataRoot),
-      ensureDirectory(this.jobsDir),
-      ensureDirectory(this.packsDir),
-      ensureDirectory(this.issuesDir),
-      ensureDirectory(this.auditDir)
-    ]);
-    await this.recoverInFlightJobs();
-    await this.pruneExpiredData();
-  }
-
-  private async pruneExpiredData(): Promise<void> {
-    const retentionDays = this.config.retentionDays;
-    const cleanupDir = async (dirPath: string) => {
-      if (!(await fileExists(dirPath))) {
-        return;
-      }
-
-      const entries = await fs.readdir(dirPath, { withFileTypes: true });
-      await Promise.all(
-        entries.map(async (entry) => {
-          const fullPath = path.join(dirPath, entry.name);
-          if (entry.isDirectory()) {
-            await cleanupDir(fullPath);
-            return;
-          }
-
-          const stats = await fs.stat(fullPath);
-          if (isExpired(stats.mtime.toISOString(), retentionDays)) {
-            await fs.unlink(fullPath);
-          }
-        })
-      );
-    };
-
-    await Promise.all([cleanupDir(this.jobsDir), cleanupDir(this.packsDir), cleanupDir(this.issuesDir), cleanupDir(this.auditDir)]);
-  }
-
-  private async recoverInFlightJobs(): Promise<void> {
-    const jobs = await this.listJobs();
-
-    await Promise.all(
-      jobs
-        .filter((job) => job.status === "queued" || job.status === "running")
-        .map((job) =>
-          this.saveJob({
-            ...job,
-            status: "failed",
-            updatedAt: nowIso(),
-            error: "Server restarted before the job completed"
-          })
-        )
-    );
-  }
-
-  private tenantJobDir(tenantId: string): string {
-    return path.join(this.jobsDir, tenantId);
-  }
-
-  private tenantPackDir(tenantId: string): string {
-    return path.join(this.packsDir, tenantId);
-  }
-
-  private tenantIssueDir(tenantId: string): string {
-    return path.join(this.issuesDir, tenantId);
-  }
-
-  private auditPath(tenantId: string, eventId: string): string {
-    return path.join(this.auditDir, tenantId, `${eventId}.json`);
-  }
-
-  private jobPath(tenantId: string, jobId: string): string {
-    return path.join(this.tenantJobDir(tenantId), `${jobId}.json`);
-  }
-
-  private packPath(tenantId: string, ticketId: string): string {
-    return path.join(this.tenantPackDir(tenantId), `${ticketId}.json`);
-  }
-
-  private issuePath(tenantId: string, ticketId: string, target: IssueTarget): string {
-    return path.join(this.tenantIssueDir(tenantId), `${ticketId}.${target}.md`);
+    await this.backend.initialize();
+    await this.recoverLeasedJobs();
+    await this.backend.pruneExpiredData(this.config.retentionDays);
   }
 
   async recordAuditEvent(event: Omit<AuditEvent, "eventId" | "timestamp">): Promise<void> {
@@ -129,77 +39,65 @@ export class ReproStore {
       timestamp: nowIso(),
       ...event
     });
-    await writeJsonFile(this.auditPath(payload.tenantId, payload.eventId), payload);
+    await this.backend.saveAuditEvent(payload);
   }
 
   async saveJob(job: ProcessingJob): Promise<void> {
-    await ensureDirectory(this.tenantJobDir(job.tenantId));
-    await writeJsonFile(this.jobPath(job.tenantId, job.jobId), ProcessingJobSchema.parse(job));
+    await this.backend.saveJob(ProcessingJobSchema.parse(job));
   }
 
   async getJob(jobId: string, tenantId = "default"): Promise<ProcessingJob | undefined> {
-    const filePath = this.jobPath(tenantId, jobId);
-    if (!(await fileExists(filePath))) {
-      return undefined;
-    }
-
-    return ProcessingJobSchema.parse(await readJsonFile<unknown>(filePath));
+    return this.backend.getJob(jobId, tenantId);
   }
 
   async listJobs(tenantId?: string): Promise<ProcessingJob[]> {
-    const root = tenantId ? this.tenantJobDir(tenantId) : this.jobsDir;
-    if (!(await fileExists(root))) {
-      return [];
-    }
-
-    const files = await this.collectJsonFiles(root);
-    const jobs = await Promise.all(files.map((filePath) => readJsonFile<unknown>(filePath)));
-
-    return jobs
-      .map((entry) => ProcessingJobSchema.parse(entry))
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    return this.backend.listJobs(tenantId);
   }
 
-  async savePack(record: StoredReproPack): Promise<void> {
-    await ensureDirectory(this.tenantPackDir(record.tenantId));
-    await writeJsonFile(this.packPath(record.tenantId, record.ticketId), StoredReproPackSchema.parse(record));
-  }
-
-  async getPack(ticketId: string, tenantId = "default"): Promise<StoredReproPack | undefined> {
-    const filePath = this.packPath(tenantId, ticketId);
-    if (!(await fileExists(filePath))) {
+  async claimNextJob(): Promise<ProcessingJob | undefined> {
+    const jobs = await this.listJobs();
+    const now = Date.now();
+    const candidate = jobs
+      .filter((job) => job.status === "queued" || (job.status === "running" && this.isLeaseExpired(job, now)))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))[0];
+    if (!candidate) {
       return undefined;
     }
 
-    return StoredReproPackSchema.parse(await readJsonFile<unknown>(filePath));
+    const claimed: ProcessingJob = {
+      ...candidate,
+      status: "running",
+      updatedAt: nowIso(),
+      leaseExpiresAt: new Date(now + this.config.queueLeaseMs).toISOString(),
+      attempts: (candidate.attempts ?? 0) + 1
+    };
+    await this.saveJob(claimed);
+    return claimed;
+  }
+
+  async heartbeatJob(jobId: string, tenantId: string): Promise<void> {
+    const existing = await this.getJob(jobId, tenantId);
+    if (!existing || existing.status !== "running") {
+      return;
+    }
+
+    await this.saveJob({
+      ...existing,
+      updatedAt: nowIso(),
+      leaseExpiresAt: new Date(Date.now() + this.config.queueLeaseMs).toISOString()
+    });
+  }
+
+  async savePack(record: StoredReproPack): Promise<void> {
+    await this.backend.savePack(StoredReproPackSchema.parse(record));
+  }
+
+  async getPack(ticketId: string, tenantId = "default"): Promise<StoredReproPack | undefined> {
+    return this.backend.getPack(ticketId, tenantId);
   }
 
   async listPacks(tenantId?: string): Promise<StoredReproPack[]> {
-    const root = tenantId ? this.tenantPackDir(tenantId) : this.packsDir;
-    if (!(await fileExists(root))) {
-      return [];
-    }
-
-    const files = await this.collectJsonFiles(root);
-    const packs = await Promise.all(files.map((filePath) => readJsonFile<unknown>(filePath)));
-
-    return packs
-      .map((entry) => StoredReproPackSchema.parse(entry))
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-  }
-
-  private async collectJsonFiles(root: string): Promise<string[]> {
-    const entries = await fs.readdir(root, { withFileTypes: true });
-    const nested = await Promise.all(
-      entries.map(async (entry) => {
-        const fullPath = path.join(root, entry.name);
-        if (entry.isDirectory()) {
-          return this.collectJsonFiles(fullPath);
-        }
-        return entry.name.endsWith(".json") ? [fullPath] : [];
-      })
-    );
-    return nested.flat();
+    return this.backend.listPacks(tenantId);
   }
 
   async upsertPack(input: {
@@ -219,7 +117,6 @@ export class ReproStore {
   }): Promise<StoredReproPack> {
     const existing = await this.getPack(input.ticketId, input.tenantId);
     const timestamp = nowIso();
-
     const record: StoredReproPack = {
       tenantId: input.tenantId,
       ticketId: input.ticketId,
@@ -246,6 +143,7 @@ export class ReproStore {
     status: ReviewStatus;
     reviewer?: string;
     note?: string;
+    actor?: AuditEvent["actor"];
   }): Promise<StoredReproPack> {
     const existing = await this.getPack(input.ticketId, input.tenantId);
     if (!existing) {
@@ -272,6 +170,7 @@ export class ReproStore {
       ticketId: input.ticketId,
       action: "pack.reviewed",
       outcome: "success",
+      actor: input.actor,
       metadata: { status: input.status, reviewer: input.reviewer ?? "not available" }
     });
     return updated;
@@ -304,9 +203,32 @@ export class ReproStore {
       throw new Error("Issue draft export requires an approved repro pack");
     }
 
-    const issuePath = this.issuePath(tenantId, ticketId, target);
-    await ensureDirectory(this.tenantIssueDir(tenantId));
-    await writeTextFile(issuePath, `${record.issueDraft.body}\n`);
-    return issuePath;
+    const filePath = path.join(this.config.artifactOutputDir, "issues", tenantId, `${ticketId}.${target}.md`);
+    await writeTextFile(filePath, `${record.issueDraft.body}\n`);
+    return filePath;
+  }
+
+  private async recoverLeasedJobs(): Promise<void> {
+    const jobs = await this.listJobs();
+    const now = Date.now();
+    await Promise.all(
+      jobs
+        .filter((job) => job.status === "running" && this.isLeaseExpired(job, now))
+        .map((job) =>
+          this.saveJob({
+            ...job,
+            status: "queued",
+            updatedAt: nowIso(),
+            leaseExpiresAt: undefined
+          })
+        )
+    );
+  }
+
+  private isLeaseExpired(job: ProcessingJob, now = Date.now()): boolean {
+    if (!job.leaseExpiresAt) {
+      return true;
+    }
+    return new Date(job.leaseExpiresAt).getTime() <= now;
   }
 }

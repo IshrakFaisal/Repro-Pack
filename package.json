@@ -15,11 +15,11 @@
     "dev": "tsx watch src/server/start.ts",
     "start": "node dist/server/start.js",
     "cli": "tsx src/cli/main.ts",
-    "test": "vitest run --config ./vitest.config.mjs",
-    "test:watch": "vitest --config ./vitest.config.mjs",
+    "test": "node .\\node_modules\\vitest\\vitest.mjs run --environment node",
+    "test:watch": "node .\\node_modules\\vitest\\vitest.mjs --environment node",
     "process:fixture": "tsx src/cli/main.ts process --ticket browser-only-complaint --dry-run",
     "generate:samples": "tsx scripts/generate-sample-outputs.ts",
-    "check": "pnpm typecheck && pnpm test"
+    "check": "corepack pnpm typecheck && corepack pnpm test"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

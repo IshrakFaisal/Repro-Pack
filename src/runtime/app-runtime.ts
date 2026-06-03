@@ -1,21 +1,34 @@
 import type { AppConfig } from "../config/env";
 import { loadConfig } from "../config/env";
 import { JobRunner } from "../jobs/job-runner";
+import { MetricsRegistry } from "../observability/metrics";
+import { FilesystemPersistenceBackend } from "../persistence/filesystem-backend";
 import { ReproStore } from "../persistence/store";
+import { SqlitePersistenceBackend } from "../persistence/sqlite-backend";
 import { createProviderRegistry } from "../providers/factory";
+import { createSecretManager } from "../secrets/manager";
 import { createLogger } from "../utils/logger";
 
 export async function createRuntime(overrides?: { config?: AppConfig }) {
   const config = overrides?.config ?? loadConfig();
   const logger = createLogger(config.logLevel);
-  const providers = createProviderRegistry(config);
-  const store = new ReproStore(config);
+  const secretManager = createSecretManager();
+  const metrics = new MetricsRegistry();
+  const providers = createProviderRegistry(config, secretManager, metrics);
+  const backend =
+    config.storageDriver === "sqlite"
+      ? new SqlitePersistenceBackend(config.sqliteDatabasePath)
+      : new FilesystemPersistenceBackend(config.dataRoot);
+  const store = new ReproStore(config, backend);
   await store.initialize();
-  const jobs = new JobRunner(providers, store, logger);
+  const jobs = new JobRunner(providers, store, logger, metrics, config);
+  await jobs.start();
 
   return {
     config,
     logger,
+    metrics,
+    secretManager,
     providers,
     store,
     jobs
