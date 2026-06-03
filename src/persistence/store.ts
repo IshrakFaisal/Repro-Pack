@@ -32,7 +32,6 @@ export class ReproStore {
   async initialize(): Promise<void> {
     await this.backend.initialize();
     await this.recoverLeasedJobs();
-    await this.backend.pruneExpiredData(this.config.retentionDays);
   }
 
   async recordAuditEvent(event: Omit<AuditEvent, "eventId" | "timestamp">): Promise<void> {
@@ -164,6 +163,10 @@ export class ReproStore {
 
   async listPacks(tenantId?: string): Promise<StoredReproPack[]> {
     return this.backend.listPacks(tenantId);
+  }
+
+  async pruneExpiredData(input: { tenantId: string; retentionDays: number; dryRun?: boolean }): Promise<number> {
+    return this.backend.pruneExpiredData(input);
   }
 
   async upsertPack(input: {

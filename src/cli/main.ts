@@ -3,6 +3,7 @@ import type { ReviewStatus, StoredReproPack } from "../types/schemas";
 import { processTicket } from "../pipeline/process-ticket";
 import { createRuntime } from "../runtime/app-runtime";
 import { syncIssuesForPack } from "../issues/issue-sync";
+import { runRetentionCleanup } from "../jobs/retention";
 
 function normalizeCommandArgs(): string[] {
   const argv = process.argv.slice(2);
@@ -43,12 +44,12 @@ function sortPacks(packs: StoredReproPack[], sort = "updatedAt", direction = "de
 
 async function run() {
   const [command, ...rest] = normalizeCommandArgs();
-  const runtime = await createRuntime();
-  const { config, logger, providers, store, jobs } = runtime;
+  const runtime = await createRuntime({ skipRetentionCleanup: command === "cleanup" });
+  const { config, logger, providers, store, jobs, tenantConfigStore } = runtime;
 
   if (!command || command === "help" || command === "--help") {
     process.stdout.write(
-      "Usage:\n  repro-pack process --ticket <fixture-id|path> [--tenant <tenant-id>] [--support-ticket-id <id>] [--dry-run] [--write-artifacts] [--async] [--max-attempts <n>]\n  repro-pack health\n  repro-pack jobs [--tenant <tenant-id>] [--status <queued|running|succeeded|failed|dead_lettered>]\n  repro-pack job --id <job-id> [--tenant <tenant-id>]\n  repro-pack retry-job --id <job-id> [--tenant <tenant-id>]\n  repro-pack audit-events [--tenant <tenant-id>] [--action <name>] [--outcome <success|error>] [--ticket <ticket-id>]\n  repro-pack packs [--tenant <tenant-id>] [--status <draft|reviewed|approved|rejected>] [--search <text>] [--sort <updatedAt|createdAt|ticketId|confidence>] [--direction <asc|desc>]\n  repro-pack pack --ticket <ticket-id> [--tenant <tenant-id>]\n  repro-pack review --ticket <ticket-id> --status <reviewed|approved|rejected> [--tenant <tenant-id>] [--reviewer <name>] [--note <text>]\n  repro-pack sync-issues --ticket <ticket-id> [--tenant <tenant-id>] [--target github] [--target jira] [--write]\n  repro-pack export-issue --ticket <ticket-id> [--tenant <tenant-id>] [--target github|jira]\n"
+      "Usage:\n  repro-pack process --ticket <fixture-id|path> [--tenant <tenant-id>] [--support-ticket-id <id>] [--dry-run] [--write-artifacts] [--async] [--max-attempts <n>]\n  repro-pack health\n  repro-pack jobs [--tenant <tenant-id>] [--status <queued|running|succeeded|failed|dead_lettered>]\n  repro-pack job --id <job-id> [--tenant <tenant-id>]\n  repro-pack retry-job --id <job-id> [--tenant <tenant-id>]\n  repro-pack cleanup [--tenant <tenant-id>] [--write]\n  repro-pack audit-events [--tenant <tenant-id>] [--action <name>] [--outcome <success|error>] [--ticket <ticket-id>]\n  repro-pack packs [--tenant <tenant-id>] [--status <draft|reviewed|approved|rejected>] [--search <text>] [--sort <updatedAt|createdAt|ticketId|confidence>] [--direction <asc|desc>]\n  repro-pack pack --ticket <ticket-id> [--tenant <tenant-id>]\n  repro-pack review --ticket <ticket-id> --status <reviewed|approved|rejected> [--tenant <tenant-id>] [--reviewer <name>] [--note <text>]\n  repro-pack sync-issues --ticket <ticket-id> [--tenant <tenant-id>] [--target github] [--target jira] [--write]\n  repro-pack export-issue --ticket <ticket-id> [--tenant <tenant-id>] [--target github|jira]\n"
     );
     return;
   }
@@ -152,6 +153,26 @@ async function run() {
 
     const job = await jobs.retryFailed(jobId, parsed.values.tenant ?? "default");
     process.stdout.write(`${JSON.stringify(job, null, 2)}\n`);
+    return;
+  }
+
+  if (command === "cleanup") {
+    const parsed = parseArgs({
+      args: rest,
+      options: {
+        tenant: { type: "string" },
+        write: { type: "boolean" }
+      }
+    });
+    const results = await runRetentionCleanup({
+      config,
+      store,
+      tenantConfigStore,
+      logger,
+      tenantId: parsed.values.tenant,
+      dryRun: !parsed.values.write
+    });
+    process.stdout.write(`${JSON.stringify({ dryRun: !parsed.values.write, results }, null, 2)}\n`);
     return;
   }
 

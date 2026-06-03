@@ -3,7 +3,7 @@ import type { ProcessingJob, StoredReproPack } from "../types/schemas";
 
 export interface PersistenceBackend {
   initialize(): Promise<void>;
-  pruneExpiredData(retentionDays: number): Promise<void>;
+  pruneExpiredData(input: { tenantId: string; retentionDays: number; dryRun?: boolean }): Promise<number>;
   listJobs(tenantId?: string): Promise<ProcessingJob[]>;
   getJob(jobId: string, tenantId: string): Promise<ProcessingJob | undefined>;
   saveJob(job: ProcessingJob): Promise<void>;

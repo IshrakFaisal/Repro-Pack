@@ -100,6 +100,27 @@ export const JiraIssueProviderConfigSchema = z.object({
   customFields: z.record(z.unknown()).default({})
 });
 
+export const LlmConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  model: z.string().min(1).default("claude-sonnet-4-20250514"),
+  apiKey: SecretRefSchema.default({ provider: "env", env: "ANTHROPIC_API_KEY" })
+});
+
+export const SlackConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  webhookUrl: SecretRefSchema,
+  channel: z.string().min(1).default("#repro-approvals")
+});
+
+export const WebhookEventNameSchema = z.enum(["pack.processed", "pack.approved", "pack.synced"]);
+
+export const WebhookConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  url: z.string().url(),
+  secret: SecretRefSchema,
+  events: z.array(WebhookEventNameSchema).default(["pack.processed", "pack.approved", "pack.synced"])
+});
+
 export const TenantProviderConfigSchema = z.object({
   support: ZendeskProviderConfigSchema.optional(),
   logs: GenericHttpContextProviderConfigSchema.optional(),
@@ -107,7 +128,9 @@ export const TenantProviderConfigSchema = z.object({
   featureFlags: GenericHttpContextProviderConfigSchema.optional(),
   release: GenericHttpContextProviderConfigSchema.optional(),
   github: GitHubIssueProviderConfigSchema.optional(),
-  jira: JiraIssueProviderConfigSchema.optional()
+  jira: JiraIssueProviderConfigSchema.optional(),
+  slack: SlackConfigSchema.optional(),
+  webhook: WebhookConfigSchema.optional()
 });
 
 export const TenantConfigSchema = z.object({
@@ -115,6 +138,7 @@ export const TenantConfigSchema = z.object({
   name: z.string().min(1),
   redactDirectIdentifiers: z.boolean().optional(),
   retentionDays: z.number().int().positive().optional(),
+  llm: LlmConfigSchema.optional(),
   auth: TenantAuthConfigSchema.default({ apiKeys: [] }),
   providers: TenantProviderConfigSchema.default({})
 });
@@ -159,6 +183,25 @@ export const ResolvedJiraIssueProviderConfigSchema = z.object({
   customFields: z.record(z.unknown()).default({})
 });
 
+export const ResolvedLlmConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  model: z.string(),
+  apiKey: z.string().optional()
+});
+
+export const ResolvedSlackConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  webhookUrl: z.string().optional(),
+  channel: z.string().default("#repro-approvals")
+});
+
+export const ResolvedWebhookConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  url: z.string().url(),
+  secret: z.string().optional(),
+  events: z.array(WebhookEventNameSchema).default(["pack.processed", "pack.approved", "pack.synced"])
+});
+
 export const ResolvedTenantProviderConfigSchema = z.object({
   support: ResolvedZendeskProviderConfigSchema.optional(),
   logs: ResolvedGenericHttpContextProviderConfigSchema.optional(),
@@ -166,7 +209,9 @@ export const ResolvedTenantProviderConfigSchema = z.object({
   featureFlags: ResolvedGenericHttpContextProviderConfigSchema.optional(),
   release: ResolvedGenericHttpContextProviderConfigSchema.optional(),
   github: ResolvedGitHubIssueProviderConfigSchema.optional(),
-  jira: ResolvedJiraIssueProviderConfigSchema.optional()
+  jira: ResolvedJiraIssueProviderConfigSchema.optional(),
+  slack: ResolvedSlackConfigSchema.optional(),
+  webhook: ResolvedWebhookConfigSchema.optional()
 });
 
 export const ResolvedTenantConfigSchema = z.object({
@@ -174,6 +219,7 @@ export const ResolvedTenantConfigSchema = z.object({
   name: z.string(),
   redactDirectIdentifiers: z.boolean().optional(),
   retentionDays: z.number().int().positive().optional(),
+  llm: ResolvedLlmConfigSchema.optional(),
   auth: ResolvedTenantAuthConfigSchema.default({ apiKeys: [] }),
   providers: ResolvedTenantProviderConfigSchema
 });
@@ -211,6 +257,7 @@ export type TenantConfig = z.infer<typeof TenantConfigSchema>;
 export type ResolvedTenantConfig = z.infer<typeof ResolvedTenantConfigSchema>;
 export type SecretRef = z.infer<typeof SecretRefSchema>;
 export type TenantApiKey = z.infer<typeof TenantApiKeySchema>;
+export type WebhookEventName = z.infer<typeof WebhookEventNameSchema>;
 export type IssueTarget = z.infer<typeof IssueTargetSchema>;
 export type IssueLink = z.infer<typeof IssueLinkSchema>;
 export type AuditEvent = z.infer<typeof AuditEventSchema>;

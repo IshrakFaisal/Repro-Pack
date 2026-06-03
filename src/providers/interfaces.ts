@@ -58,6 +58,18 @@ export interface IssueTrackerProvider {
   }): Promise<IssueLink>;
 }
 
+export interface NotificationProvider {
+  name: string;
+  postPackApproved(input: {
+    tenantId: string;
+    tenantName: string;
+    ticketId: string;
+    confidence: number;
+    reviewer: string;
+    packUrl?: string;
+  }): Promise<void>;
+}
+
 export type ProviderSet = {
   config: AppConfig;
   tenant: ResolvedTenantConfig | undefined;
@@ -67,6 +79,9 @@ export type ProviderSet = {
   release: ReleaseProvider;
   session: SessionProvider;
   issueTrackers: Partial<Record<IssueTarget, IssueTrackerProvider>>;
+  notifications: {
+    slack?: NotificationProvider;
+  };
 };
 
 export type ProcessRequestInput = {

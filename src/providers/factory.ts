@@ -21,6 +21,17 @@ import {
   FixtureSessionProvider,
   FixtureSupportProvider
 } from "./mock-fixture-provider";
+import { SlackNotificationProvider } from "./slack";
+
+type MinimalLogger = {
+  info: (obj: unknown, message?: string) => void;
+  error: (obj: unknown, message?: string) => void;
+};
+
+const noopLogger: MinimalLogger = {
+  info: () => undefined,
+  error: () => undefined
+};
 
 class UnavailableLogsProvider {
   name = "unavailable-logs";
@@ -84,7 +95,8 @@ export class AppProviderRegistry implements ProviderRegistry {
   constructor(
     private readonly config: AppConfig,
     secretManager: SecretManager,
-    private readonly metrics?: MetricsRegistry
+    private readonly metrics?: MetricsRegistry,
+    private readonly logger: MinimalLogger = noopLogger
   ) {
     this.tenantConfigStore = new TenantConfigStore(config, secretManager);
   }
@@ -101,7 +113,8 @@ export class AppProviderRegistry implements ProviderRegistry {
         featureFlags: new FixtureFeatureFlagProvider(this.config.fixtureRoot),
         release: new FixtureReleaseProvider(this.config.fixtureRoot),
         session: new FixtureSessionProvider(this.config.fixtureRoot),
-        issueTrackers: {}
+        issueTrackers: {},
+        notifications: {}
       };
     }
 
@@ -122,6 +135,9 @@ export class AppProviderRegistry implements ProviderRegistry {
       issueTrackers: {
         github: tenant.providers.github ? new GitHubIssueTracker(tenant, client) : undefined,
         jira: tenant.providers.jira ? new JiraIssueTracker(tenant, client) : undefined
+      },
+      notifications: {
+        slack: tenant.providers.slack?.enabled ? new SlackNotificationProvider(tenant, this.config, this.logger) : undefined
       }
     };
   }
@@ -130,7 +146,8 @@ export class AppProviderRegistry implements ProviderRegistry {
 export function createProviderRegistry(
   config: AppConfig,
   secretManager: SecretManager,
-  metrics?: MetricsRegistry
+  metrics?: MetricsRegistry,
+  logger?: MinimalLogger
 ): ProviderRegistry {
-  return new AppProviderRegistry(config, secretManager, metrics);
+  return new AppProviderRegistry(config, secretManager, metrics, logger);
 }

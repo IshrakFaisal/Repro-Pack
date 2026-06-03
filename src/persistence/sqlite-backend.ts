@@ -54,12 +54,25 @@ export class SqlitePersistenceBackend implements PersistenceBackend {
     `);
   }
 
-  async pruneExpiredData(retentionDays: number): Promise<void> {
+  async pruneExpiredData(input: { tenantId: string; retentionDays: number; dryRun?: boolean }): Promise<number> {
     const db = this.requireDb();
-    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
-    db.prepare("DELETE FROM jobs WHERE updated_at < ?").run(cutoff);
-    db.prepare("DELETE FROM packs WHERE updated_at < ?").run(cutoff);
-    db.prepare("DELETE FROM audit_events WHERE timestamp < ?").run(cutoff);
+    const cutoff = new Date(Date.now() - input.retentionDays * 24 * 60 * 60 * 1000).toISOString();
+    const jobs = this.listJobs(input.tenantId);
+    const packs = this.listPacks(input.tenantId);
+    const auditEvents = this.listAuditEvents(input.tenantId);
+    const [jobRows, packRows, auditRows] = await Promise.all([jobs, packs, auditEvents]);
+    const deletedCount =
+      jobRows.filter((job) => job.updatedAt < cutoff).length +
+      packRows.filter((pack) => pack.updatedAt < cutoff).length +
+      auditRows.filter((event) => event.timestamp < cutoff).length;
+
+    if (!input.dryRun) {
+      db.prepare("DELETE FROM jobs WHERE tenant_id = ? AND updated_at < ?").run(input.tenantId, cutoff);
+      db.prepare("DELETE FROM packs WHERE tenant_id = ? AND updated_at < ?").run(input.tenantId, cutoff);
+      db.prepare("DELETE FROM audit_events WHERE tenant_id = ? AND timestamp < ?").run(input.tenantId, cutoff);
+    }
+
+    return deletedCount;
   }
 
   async listJobs(tenantId?: string): Promise<ProcessingJob[]> {

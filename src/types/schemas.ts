@@ -168,6 +168,15 @@ export const ConfidenceScoreSchema = z.object({
   factors: z.array(z.string()).default([])
 });
 
+export const LlmSuggestionsSchema = z
+  .object({
+    steps: z.array(z.string()).default([]),
+    model: z.string(),
+    generatedAt: z.string()
+  })
+  .nullable()
+  .default(null);
+
 export const EnvironmentSchema = z.object({
   browser: z.string(),
   browserVersion: z.string(),
@@ -191,7 +200,8 @@ export const ReproPackSchema = z.object({
   samplePayload: z.unknown(),
   sanitizationReport: z.array(SanitizationReportItemSchema),
   evidence: z.array(EvidenceItemSchema),
-  confidence: ConfidenceScoreSchema
+  confidence: ConfidenceScoreSchema,
+  llmSuggestions: LlmSuggestionsSchema
 });
 
 export const IssueDraftSchema = z.object({
@@ -286,6 +296,7 @@ export type ProviderResult = z.infer<typeof ProviderResultSchema>;
 export type SanitizationReportItem = z.infer<typeof SanitizationReportItemSchema>;
 export type ReproStep = z.infer<typeof ReproStepSchema>;
 export type ConfidenceScore = z.infer<typeof ConfidenceScoreSchema>;
+export type LlmSuggestions = z.infer<typeof LlmSuggestionsSchema>;
 export type ReproPack = z.infer<typeof ReproPackSchema>;
 export type IssueDraft = z.infer<typeof IssueDraftSchema>;
 export type ReviewStatus = z.infer<typeof ReviewStatusSchema>;

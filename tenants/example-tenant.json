@@ -3,6 +3,11 @@
   "name": "Example Tenant",
   "redactDirectIdentifiers": true,
   "retentionDays": 30,
+  "llm": {
+    "enabled": false,
+    "model": "claude-sonnet-4-20250514",
+    "apiKey": { "provider": "env", "env": "ANTHROPIC_API_KEY" }
+  },
   "auth": {
     "apiKeys": [
       {
@@ -65,6 +70,17 @@
       "customFields": {
         "customfield_10001": "repro-pack"
       }
+    },
+    "slack": {
+      "enabled": false,
+      "webhookUrl": { "provider": "env", "env": "SLACK_WEBHOOK_URL" },
+      "channel": "#repro-approvals"
+    },
+    "webhook": {
+      "enabled": false,
+      "url": "https://your-service.com/hooks/repro",
+      "secret": { "provider": "env", "env": "WEBHOOK_SECRET" },
+      "events": ["pack.processed", "pack.approved", "pack.synced"]
     }
   }
 }

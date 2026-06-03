@@ -5,12 +5,17 @@ import {
   ResolvedGitHubIssueProviderConfigSchema,
   ResolvedGenericHttpContextProviderConfigSchema,
   ResolvedJiraIssueProviderConfigSchema,
+  ResolvedLlmConfigSchema,
+  ResolvedSlackConfigSchema,
   ResolvedTenantConfigSchema,
+  ResolvedWebhookConfigSchema,
   ResolvedZendeskProviderConfigSchema,
   TenantConfigSchema,
+  type TenantConfig,
   type ResolvedTenantConfig
 } from "../types/integrations";
 import { fileExists, readJsonFile } from "../utils/fs";
+import fs from "node:fs/promises";
 
 export class TenantConfigStore {
   constructor(
@@ -41,6 +46,12 @@ export class TenantConfigStore {
       name: raw.name,
       redactDirectIdentifiers: raw.redactDirectIdentifiers,
       retentionDays: raw.retentionDays,
+      llm: raw.llm
+        ? ResolvedLlmConfigSchema.parse({
+            ...raw.llm,
+            apiKey: await this.secretManager.resolve(raw.llm.apiKey)
+          })
+        : undefined,
       auth: {
         apiKeys: await Promise.all(
           raw.auth.apiKeys.map(async (key) => ({
@@ -97,8 +108,41 @@ export class TenantConfigStore {
               apiToken: await this.secretManager.resolve(raw.providers.jira.apiToken),
               bearerToken: await this.secretManager.resolve(raw.providers.jira.bearerToken)
             })
+          : undefined,
+        slack: raw.providers.slack
+          ? ResolvedSlackConfigSchema.parse({
+              ...raw.providers.slack,
+              webhookUrl: await this.secretManager.resolve(raw.providers.slack.webhookUrl)
+            })
+          : undefined,
+        webhook: raw.providers.webhook
+          ? ResolvedWebhookConfigSchema.parse({
+              ...raw.providers.webhook,
+              secret: await this.secretManager.resolve(raw.providers.webhook.secret)
+            })
           : undefined
       }
     });
+  }
+
+  async loadRaw(tenantId: string): Promise<TenantConfig | undefined> {
+    const filePath = path.join(this.config.tenantConfigRoot, `${tenantId}.json`);
+    if (!(await fileExists(filePath))) {
+      return undefined;
+    }
+
+    return TenantConfigSchema.parse(await readJsonFile<unknown>(filePath));
+  }
+
+  async listTenantIds(): Promise<string[]> {
+    if (!(await fileExists(this.config.tenantConfigRoot))) {
+      return [];
+    }
+
+    const entries = await fs.readdir(this.config.tenantConfigRoot, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map((entry) => entry.name.replace(/\.json$/i, ""))
+      .sort();
   }
 }

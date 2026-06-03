@@ -5,6 +5,7 @@ import type { ProcessRequestInput, ProviderRegistry } from "../providers/interfa
 import type { ProcessingJob, StoredReproPack } from "../types/schemas";
 import { ReproStore } from "../persistence/store";
 import { processTicket } from "../pipeline/process-ticket";
+import { WebhookDispatcher } from "../webhooks/dispatcher";
 
 type MinimalLogger = {
   info: (obj: unknown, message?: string) => void;
@@ -125,7 +126,7 @@ export class JobRunner {
         supportTicketId: job.sourceLookup.supportTicketId
       };
       const result = await processTicket(input, providerSet, this.logger, this.metrics);
-      await this.store.upsertPack({
+      const storedPack = await this.store.upsertPack({
         tenantId: job.tenantId,
         ticketId: result.ticket.ticketId,
         dryRun: result.dryRun,
@@ -155,6 +156,14 @@ export class JobRunner {
         outcome: "success",
         actor: job.actor,
         metadata: { jobId: job.jobId, attempts: job.attempts }
+      });
+      void new WebhookDispatcher(this.config, this.logger).dispatch(providerSet.tenant, {
+        event: "pack.processed",
+        tenantId: storedPack.tenantId,
+        ticketId: storedPack.ticketId,
+        status: "processed",
+        confidence: storedPack.reproPack.confidence.overall,
+        timestamp: new Date().toISOString()
       });
       this.metrics.increment("repro_queue_jobs_total", "Queue jobs processed", {
         status: "succeeded",

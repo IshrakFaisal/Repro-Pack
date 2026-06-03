@@ -26,6 +26,18 @@ function formatReproSteps(reproSteps: ReproStep[]): string {
     .join("\n");
 }
 
+function formatLlmSuggestions(reproPack: ReproPack): string {
+  if (!reproPack.llmSuggestions || reproPack.llmSuggestions.steps.length === 0) {
+    return "- not available";
+  }
+
+  const header = `⚠ AI-suggested, not evidence-backed. Model: ${reproPack.llmSuggestions.model}. Generated: ${reproPack.llmSuggestions.generatedAt}`;
+  return [
+    header,
+    ...reproPack.llmSuggestions.steps.map((step, index) => `${index + 1}. ${step}`)
+  ].join("\n");
+}
+
 function formatTimeline(timeline: ReproPack["timeline"]): string {
   if (timeline.length === 0) {
     return "- not available";
@@ -85,6 +97,9 @@ ${ticket.complaintText}
 
 ## Likely repro steps
 ${formatReproSteps(reproPack.reproSteps)}
+
+## AI-suggested step overlay
+${formatLlmSuggestions(reproPack)}
 
 ## Expected vs actual
 - Expected: ${reproPack.expectedBehavior}

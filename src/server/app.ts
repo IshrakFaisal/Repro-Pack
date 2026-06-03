@@ -9,6 +9,9 @@ import { normalizeEvidence } from "../normalization/evidence-normalizer";
 import { createRuntime } from "../runtime/app-runtime";
 import { syncIssuesForPack } from "../issues/issue-sync";
 import type { StoredReproPack } from "../types/schemas";
+import { WebhookDispatcher } from "../webhooks/dispatcher";
+import type { PackWebhookEvent } from "../webhooks/events";
+import type { ProviderSet } from "../providers/interfaces";
 
 const ProcessRequestSchema = z
   .object({
@@ -143,10 +146,36 @@ function providerStatusSummary(pack: StoredReproPack) {
   };
 }
 
+function buildPackUrl(baseUrl: string | undefined, tenantId: string, ticketId: string): string | undefined {
+  if (!baseUrl) {
+    return undefined;
+  }
+
+  return `${baseUrl}/packs/${encodeURIComponent(ticketId)}?tenantId=${encodeURIComponent(tenantId)}`;
+}
+
+function dispatchPackWebhook(input: {
+  dispatcher: WebhookDispatcher;
+  providerSet: ProviderSet;
+  pack: StoredReproPack;
+  event: PackWebhookEvent["event"];
+  status: PackWebhookEvent["status"];
+}) {
+  void input.dispatcher.dispatch(input.providerSet.tenant, {
+    event: input.event,
+    tenantId: input.pack.tenantId,
+    ticketId: input.pack.ticketId,
+    status: input.status,
+    confidence: input.pack.reproPack.confidence.overall,
+    timestamp: new Date().toISOString()
+  });
+}
+
 export async function createApp() {
   const runtime = await createRuntime();
   const { config, logger, metrics, providers, store, jobs } = runtime;
   const app = Fastify({ loggerInstance: logger });
+  const webhookDispatcher = new WebhookDispatcher(config, logger);
 
   async function resolveActor(request: Parameters<typeof authenticateRequest>[0]["request"]): Promise<AuthActor | undefined> {
     const tenantId = tenantIdFromRequest({ headers: request.headers as Record<string, unknown>, body: request.body, query: request.query });
@@ -247,6 +276,13 @@ export async function createApp() {
         dryRun: result.dryRun,
         issueLinks: storedPack.issueLinks.length
       }
+    });
+    dispatchPackWebhook({
+      dispatcher: webhookDispatcher,
+      providerSet,
+      pack: storedPack,
+      event: "pack.processed",
+      status: "processed"
     });
 
     reply.send({
@@ -353,6 +389,7 @@ export async function createApp() {
     const params = z.object({ ticketId: z.string() }).parse(request.params);
     const body = ReviewRequestSchema.parse(request.body);
     const tenantId = resolveTenantScope(actor, body.tenantId);
+    const providerSet = await providers.create({ tenantId });
     const updated = await store.reviewPack({
       tenantId,
       ticketId: params.ticketId,
@@ -361,6 +398,24 @@ export async function createApp() {
       note: body.note,
       actor
     });
+
+    if (body.status === "approved") {
+      void providerSet.notifications.slack?.postPackApproved({
+        tenantId,
+        tenantName: providerSet.tenant?.name ?? tenantId,
+        ticketId: updated.ticketId,
+        confidence: updated.reproPack.confidence.overall,
+        reviewer: body.reviewer ?? actor.actorId,
+        packUrl: buildPackUrl(config.baseUrl, tenantId, updated.ticketId)
+      });
+      dispatchPackWebhook({
+        dispatcher: webhookDispatcher,
+        providerSet,
+        pack: updated,
+        event: "pack.approved",
+        status: "approved"
+      });
+    }
 
     reply.send(updated);
   });
@@ -381,6 +436,16 @@ export async function createApp() {
       actor,
       metrics
     });
+    const syncedPack = await store.getPack(params.ticketId, tenantId);
+    if (!body.dryRun && syncedPack) {
+      dispatchPackWebhook({
+        dispatcher: webhookDispatcher,
+        providerSet,
+        pack: syncedPack,
+        event: "pack.synced",
+        status: "synced"
+      });
+    }
 
     reply.send({
       tenantId,

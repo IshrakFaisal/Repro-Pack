@@ -7,6 +7,7 @@ import { sanitizePayload } from "../sanitizer/sanitizer";
 import { generateReproSteps } from "../repro/repro-step-generator";
 import { scoreConfidence } from "../scoring/confidence-scorer";
 import { assembleArtifacts } from "../assembly/issue-assembler";
+import { suggestLlmReproSteps } from "../llm/suggester";
 import { writeJsonFile, writeTextFile } from "../utils/fs";
 import { truncate } from "../utils/text";
 import type { MetricsRegistry } from "../observability/metrics";
@@ -106,6 +107,14 @@ export async function processTicket(
     });
 
     const summary = selectSummary(normalized.evidence, ticket.complaintText);
+    const llmSuggestions = await suggestLlmReproSteps({
+      tenant: providers.tenant,
+      config: providers.config,
+      logger,
+      summary,
+      reproSteps,
+      evidence: normalized.evidence
+    });
     const reproPack = ReproPackSchema.parse({
       ticketId: ticket.ticketId,
       summary,
@@ -120,7 +129,8 @@ export async function processTicket(
       samplePayload: sanitizedPayload.payload,
       sanitizationReport: sanitizedPayload.report,
       evidence: normalized.evidence,
-      confidence
+      confidence,
+      llmSuggestions
     });
 
     const assembled = assembleArtifacts({

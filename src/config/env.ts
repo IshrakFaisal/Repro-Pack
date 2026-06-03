@@ -14,11 +14,13 @@ export type AppConfig = {
   sqliteDatabasePath: string;
   processTimeoutMs: number;
   httpTimeoutMs: number;
+  llmTimeoutMs: number;
   maxProviderRetries: number;
   queuePollMs: number;
   queueLeaseMs: number;
   queueMaxAttempts: number;
   retentionDays: number;
+  baseUrl?: string;
   redactIps: boolean;
   redactDirectIdentifiers: boolean;
   appVersion: string;
@@ -46,6 +48,7 @@ export function loadConfig(cwd = process.cwd()): AppConfig {
     sqliteDatabasePath: path.resolve(cwd, process.env.SQLITE_DATABASE_PATH ?? "data/repro-pack.sqlite"),
     processTimeoutMs: Number(process.env.PROCESS_TIMEOUT_MS ?? 2500),
     httpTimeoutMs: Number(process.env.HTTP_TIMEOUT_MS ?? 5000),
+    llmTimeoutMs: Number(process.env.LLM_TIMEOUT_MS ?? 10000),
     maxProviderRetries: Number(process.env.MAX_PROVIDER_RETRIES ?? 2),
     queuePollMs: Number(process.env.QUEUE_POLL_MS ?? 250),
     queueLeaseMs: Number(process.env.QUEUE_LEASE_MS ?? 30000),
@@ -55,6 +58,7 @@ export function loadConfig(cwd = process.cwd()): AppConfig {
     redactDirectIdentifiers: toBoolean(process.env.REDACT_DIRECT_IDENTIFIERS, true),
     appVersion: process.env.APP_VERSION ?? "1.0.0",
     buildHash: process.env.BUILD_HASH ?? "not available",
+    baseUrl: process.env.BASE_URL?.trim().replace(/\/$/, "") || undefined,
     apiKey: process.env.API_KEY?.trim() || undefined
   };
 }

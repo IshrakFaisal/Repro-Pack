@@ -94,6 +94,7 @@ describe("production readiness", () => {
       sqliteDatabasePath: path.join(baseDir, "repro-pack.sqlite"),
       processTimeoutMs: 2500,
       httpTimeoutMs: 2000,
+      llmTimeoutMs: 10000,
       maxProviderRetries: 1,
       queuePollMs: 10,
       queueLeaseMs: 1000,

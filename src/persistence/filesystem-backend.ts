@@ -11,6 +11,11 @@ function isExpired(fileTimestamp: string, retentionDays: number): boolean {
   return ageMs > retentionDays * 24 * 60 * 60 * 1000;
 }
 
+type CleanupTarget = {
+  root: string;
+  timestampFromJson: (value: unknown) => string;
+};
+
 export class FilesystemPersistenceBackend implements PersistenceBackend {
   private readonly jobsDir: string;
   private readonly packsDir: string;
@@ -26,30 +31,54 @@ export class FilesystemPersistenceBackend implements PersistenceBackend {
     await Promise.all([ensureDirectory(this.rootDir), ensureDirectory(this.jobsDir), ensureDirectory(this.packsDir), ensureDirectory(this.auditDir)]);
   }
 
-  async pruneExpiredData(retentionDays: number): Promise<void> {
-    const cleanupDir = async (dirPath: string) => {
+  async pruneExpiredData(input: { tenantId: string; retentionDays: number; dryRun?: boolean }): Promise<number> {
+    const cleanupDir = async (target: CleanupTarget): Promise<number> => {
+      const dirPath = target.root;
       if (!(await fileExists(dirPath))) {
-        return;
+        return 0;
       }
 
       const entries = await fs.readdir(dirPath, { withFileTypes: true });
-      await Promise.all(
+      const counts = await Promise.all(
         entries.map(async (entry) => {
           const fullPath = path.join(dirPath, entry.name);
           if (entry.isDirectory()) {
-            await cleanupDir(fullPath);
-            return;
+            return cleanupDir({ ...target, root: fullPath });
+          }
+          if (!entry.name.endsWith(".json")) {
+            return 0;
           }
 
-          const stats = await fs.stat(fullPath);
-          if (isExpired(stats.mtime.toISOString(), retentionDays)) {
-            await fs.unlink(fullPath);
+          const raw = await readJsonFile<unknown>(fullPath);
+          const timestamp = target.timestampFromJson(raw);
+          if (isExpired(timestamp, input.retentionDays)) {
+            if (!input.dryRun) {
+              await fs.unlink(fullPath);
+            }
+            return 1;
           }
+
+          return 0;
         })
       );
+      return counts.reduce((sum, count) => sum + count, 0);
     };
 
-    await Promise.all([cleanupDir(this.jobsDir), cleanupDir(this.packsDir), cleanupDir(this.auditDir)]);
+    const [jobsDeleted, packsDeleted, auditDeleted] = await Promise.all([
+      cleanupDir({
+        root: this.tenantJobDir(input.tenantId),
+        timestampFromJson: (value) => ProcessingJobSchema.parse(value).updatedAt
+      }),
+      cleanupDir({
+        root: this.tenantPackDir(input.tenantId),
+        timestampFromJson: (value) => StoredReproPackSchema.parse(value).updatedAt
+      }),
+      cleanupDir({
+        root: path.join(this.auditDir, input.tenantId),
+        timestampFromJson: (value) => AuditEventSchema.parse(value).timestamp
+      })
+    ]);
+    return jobsDeleted + packsDeleted + auditDeleted;
   }
 
   private tenantJobDir(tenantId: string): string {
