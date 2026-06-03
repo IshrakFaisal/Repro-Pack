@@ -23,6 +23,7 @@ describe("http endpoints", () => {
     process.env.API_KEY = "test-api-key";
     process.env.ALPHA_API_KEY = "alpha-key";
     process.env.BETA_API_KEY = "beta-key";
+    process.env.QUEUE_MAX_ATTEMPTS = "3";
   });
 
   afterEach(() => {
@@ -172,6 +173,18 @@ describe("http endpoints", () => {
       headers: alphaHeaders
     });
 
+    const ownAuditResponse = await app.inject({
+      method: "GET",
+      url: "/audit-events?tenantId=alpha&action=ticket.processed",
+      headers: alphaHeaders
+    });
+
+    const crossAuditResponse = await app.inject({
+      method: "GET",
+      url: "/audit-events?tenantId=beta",
+      headers: alphaHeaders
+    });
+
     const crossReviewResponse = await app.inject({
       method: "POST",
       url: "/packs/backend-trace-correlation/review",
@@ -193,6 +206,9 @@ describe("http endpoints", () => {
     expect(ownPackResponse.statusCode).toBe(200);
     expect(crossPackResponse.statusCode).toBe(403);
     expect(crossListResponse.statusCode).toBe(403);
+    expect(ownAuditResponse.statusCode).toBe(200);
+    expect(ownAuditResponse.json().every((event: { tenantId: string; action: string }) => event.tenantId === "alpha" && event.action === "ticket.processed")).toBe(true);
+    expect(crossAuditResponse.statusCode).toBe(403);
     expect(crossReviewResponse.statusCode).toBe(403);
     expect(globalPackResponse.statusCode).toBe(200);
   });
@@ -285,6 +301,51 @@ describe("http endpoints", () => {
     expect(secondFailure.attempts).toBe(2);
   });
 
+  it("dead-letters jobs after the final failed attempt and rejects retry", async () => {
+    const app = await createApp();
+    const headers = { "x-api-key": "test-api-key" };
+
+    const enqueueResponse = await app.inject({
+      method: "POST",
+      url: "/tickets/process",
+      headers,
+      payload: {
+        fixtureId: "missing-fixture",
+        dryRun: true,
+        async: true,
+        maxAttempts: 1
+      }
+    });
+
+    expect(enqueueResponse.statusCode).toBe(202);
+    const jobId = enqueueResponse.json().jobId as string;
+    const deadLettered = await waitForJobStatus(app, jobId, "dead_lettered", headers);
+
+    const retryResponse = await app.inject({
+      method: "POST",
+      url: `/jobs/${jobId}/retry`,
+      headers
+    });
+
+    const auditResponse = await app.inject({
+      method: "GET",
+      url: `/audit-events?action=job.dead_lettered`,
+      headers
+    });
+    await app.close();
+
+    expect(deadLettered).toMatchObject({
+      status: "dead_lettered",
+      attempts: 1,
+      maxAttempts: 1
+    });
+    expect(deadLettered.deadLetteredAt).toBeTruthy();
+    expect(retryResponse.statusCode).toBe(400);
+    expect(retryResponse.json()).toMatchObject({ code: "invalid_job_state" });
+    expect(auditResponse.statusCode).toBe(200);
+    expect(auditResponse.json().some((event: { metadata: { jobId?: string } }) => event.metadata.jobId === jobId)).toBe(true);
+  });
+
   it("filters pack summaries and includes review history metadata", async () => {
     const app = await createApp();
     const headers = { "x-api-key": "test-api-key" };
@@ -324,6 +385,18 @@ describe("http endpoints", () => {
       url: "/packs?status=approved&limit=1&offset=0",
       headers
     });
+
+    const searchResponse = await app.inject({
+      method: "GET",
+      url: "/packs?search=feature&sort=ticketId&direction=asc",
+      headers
+    });
+
+    const sortedResponse = await app.inject({
+      method: "GET",
+      url: "/packs?sort=ticketId&direction=asc&limit=2",
+      headers
+    });
     await app.close();
 
     expect(response.statusCode).toBe(200);
@@ -336,6 +409,19 @@ describe("http endpoints", () => {
         status: "approved",
         reviewer: "qa@example.test"
       }
+    });
+    expect(searchResponse.statusCode).toBe(200);
+    expect(searchResponse.json().map((pack: { ticketId: string }) => pack.ticketId)).toEqual(["feature-flag-regression"]);
+    expect(sortedResponse.statusCode).toBe(200);
+    expect(sortedResponse.json().map((pack: { ticketId: string }) => pack.ticketId)).toEqual([
+      "backend-trace-correlation",
+      "feature-flag-regression"
+    ]);
+    expect(sortedResponse.json()[0].providerStatus).toMatchObject({
+      session: expect.any(String),
+      logs: expect.any(String),
+      featureFlags: expect.any(String),
+      release: expect.any(String)
     });
   });
 });
@@ -374,14 +460,14 @@ async function waitForJobStatus(
   jobId: string,
   expectedStatus: string,
   headers: Record<string, string>
-): Promise<{ status: string; attempts: number }> {
+): Promise<{ status: string; attempts: number; maxAttempts: number; deadLetteredAt?: string }> {
   for (let attempt = 0; attempt < 30; attempt += 1) {
     const response = await app.inject({
       method: "GET",
       url: `/jobs/${jobId}`,
       headers
     });
-    const job = response.json() as { status: string; attempts: number };
+    const job = response.json() as { status: string; attempts: number; maxAttempts: number; deadLetteredAt?: string };
     if (job.status === expectedStatus) {
       return job;
     }

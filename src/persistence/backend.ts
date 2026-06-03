@@ -10,5 +10,6 @@ export interface PersistenceBackend {
   listPacks(tenantId?: string): Promise<StoredReproPack[]>;
   getPack(ticketId: string, tenantId: string): Promise<StoredReproPack | undefined>;
   savePack(pack: StoredReproPack): Promise<void>;
+  listAuditEvents(tenantId?: string): Promise<AuditEvent[]>;
   saveAuditEvent(event: AuditEvent): Promise<void>;
 }

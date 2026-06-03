@@ -17,6 +17,7 @@ export type AppConfig = {
   maxProviderRetries: number;
   queuePollMs: number;
   queueLeaseMs: number;
+  queueMaxAttempts: number;
   retentionDays: number;
   redactIps: boolean;
   redactDirectIdentifiers: boolean;
@@ -48,6 +49,7 @@ export function loadConfig(cwd = process.cwd()): AppConfig {
     maxProviderRetries: Number(process.env.MAX_PROVIDER_RETRIES ?? 2),
     queuePollMs: Number(process.env.QUEUE_POLL_MS ?? 250),
     queueLeaseMs: Number(process.env.QUEUE_LEASE_MS ?? 30000),
+    queueMaxAttempts: Number(process.env.QUEUE_MAX_ATTEMPTS ?? 3),
     retentionDays: Number(process.env.RETENTION_DAYS ?? 30),
     redactIps: toBoolean(process.env.REDACT_IPS, true),
     redactDirectIdentifiers: toBoolean(process.env.REDACT_DIRECT_IDENTIFIERS, true),

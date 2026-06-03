@@ -1,6 +1,7 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AppConfig } from "../config/env";
+import { AppError } from "../observability/errors";
 import { AuditEventSchema, type AuditEvent, type IssueLink, type IssueTarget } from "../types/integrations";
 import {
   ProcessingJobSchema,
@@ -43,6 +44,22 @@ export class ReproStore {
     await this.backend.saveAuditEvent(payload);
   }
 
+  async listAuditEvents(filters: {
+    tenantId?: string;
+    action?: string;
+    outcome?: AuditEvent["outcome"];
+    ticketId?: string;
+  } = {}): Promise<AuditEvent[]> {
+    const events = await this.backend.listAuditEvents(filters.tenantId);
+    return events.filter((event) => {
+      return (
+        (!filters.action || event.action === filters.action) &&
+        (!filters.outcome || event.outcome === filters.outcome) &&
+        (!filters.ticketId || event.ticketId === filters.ticketId)
+      );
+    });
+  }
+
   async saveJob(job: ProcessingJob): Promise<void> {
     await this.backend.saveJob(ProcessingJobSchema.parse(job));
   }
@@ -58,11 +75,15 @@ export class ReproStore {
   async retryFailedJob(input: { jobId: string; tenantId: string }): Promise<ProcessingJob> {
     const existing = await this.getJob(input.jobId, input.tenantId);
     if (!existing) {
-      throw new Error(`Job not found: ${input.jobId}`);
+      throw new AppError(`Job not found: ${input.jobId}`, "not_found", 404);
     }
 
     if (existing.status !== "failed") {
-      throw new Error("Only failed jobs can be retried");
+      throw new AppError("Only failed jobs can be retried", "invalid_job_state", 400);
+    }
+
+    if (existing.attempts >= existing.maxAttempts) {
+      throw new AppError("Job has reached its retry limit", "retry_limit_reached", 400);
     }
 
     const retried = ProcessingJobSchema.parse({
@@ -86,10 +107,33 @@ export class ReproStore {
       return undefined;
     }
 
+    if (candidate.status === "running" && candidate.attempts >= candidate.maxAttempts) {
+      const deadLettered = ProcessingJobSchema.parse({
+        ...candidate,
+        status: ProcessingJobStatusSchema.enum.dead_lettered,
+        updatedAt: nowIso(),
+        leaseExpiresAt: undefined,
+        deadLetteredAt: nowIso(),
+        error: candidate.error ?? "Job lease expired after final attempt"
+      });
+      await this.saveJob(deadLettered);
+      await this.recordAuditEvent({
+        tenantId: deadLettered.tenantId,
+        ticketId: deadLettered.ticketId,
+        action: "job.dead_lettered",
+        outcome: "error",
+        actor: deadLettered.actor,
+        metadata: { jobId: deadLettered.jobId, attempts: deadLettered.attempts, maxAttempts: deadLettered.maxAttempts }
+      });
+      return this.claimNextJob();
+    }
+
+    const timestamp = nowIso();
     const claimed: ProcessingJob = {
       ...candidate,
       status: "running",
-      updatedAt: nowIso(),
+      updatedAt: timestamp,
+      lastAttemptedAt: timestamp,
       leaseExpiresAt: new Date(now + this.config.queueLeaseMs).toISOString(),
       attempts: (candidate.attempts ?? 0) + 1
     };
@@ -236,14 +280,25 @@ export class ReproStore {
     await Promise.all(
       jobs
         .filter((job) => job.status === "running" && this.isLeaseExpired(job, now))
-        .map((job) =>
-          this.saveJob({
+        .map((job) => {
+          if (job.attempts >= job.maxAttempts) {
+            return this.saveJob({
+              ...job,
+              status: "dead_lettered",
+              updatedAt: nowIso(),
+              leaseExpiresAt: undefined,
+              deadLetteredAt: nowIso(),
+              error: job.error ?? "Job lease expired after final attempt"
+            });
+          }
+
+          return this.saveJob({
             ...job,
             status: "queued",
             updatedAt: nowIso(),
             leaseExpiresAt: undefined
-          })
-        )
+          });
+        })
     );
   }
 

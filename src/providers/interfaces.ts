@@ -77,6 +77,7 @@ export type ProcessRequestInput = {
   ticketPath?: string;
   supportTicketId?: string;
   ticket?: unknown;
+  maxAttempts?: number;
 };
 
 export type ProcessResult = {

@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import type { ReviewStatus } from "../types/schemas";
+import type { ReviewStatus, StoredReproPack } from "../types/schemas";
 import { processTicket } from "../pipeline/process-ticket";
 import { createRuntime } from "../runtime/app-runtime";
 import { syncIssuesForPack } from "../issues/issue-sync";
@@ -19,6 +19,28 @@ function parseTicketReference(ticketRef: string) {
   };
 }
 
+function matchesPackSearch(pack: StoredReproPack, search?: string): boolean {
+  if (!search?.trim()) {
+    return true;
+  }
+
+  const needle = search.trim().toLowerCase();
+  return pack.ticketId.toLowerCase().includes(needle) || pack.reproPack.summary.toLowerCase().includes(needle);
+}
+
+function sortPacks(packs: StoredReproPack[], sort = "updatedAt", direction = "desc"): StoredReproPack[] {
+  const multiplier = direction === "asc" ? 1 : -1;
+  return [...packs].sort((left, right) => {
+    if (sort === "confidence") {
+      return (left.reproPack.confidence.overall - right.reproPack.confidence.overall) * multiplier;
+    }
+
+    const leftValue = sort === "ticketId" ? left.ticketId : sort === "createdAt" ? left.createdAt : left.updatedAt;
+    const rightValue = sort === "ticketId" ? right.ticketId : sort === "createdAt" ? right.createdAt : right.updatedAt;
+    return leftValue.localeCompare(rightValue) * multiplier;
+  });
+}
+
 async function run() {
   const [command, ...rest] = normalizeCommandArgs();
   const runtime = await createRuntime();
@@ -26,7 +48,7 @@ async function run() {
 
   if (!command || command === "help" || command === "--help") {
     process.stdout.write(
-      "Usage:\n  repro-pack process --ticket <fixture-id|path> [--tenant <tenant-id>] [--support-ticket-id <id>] [--dry-run] [--write-artifacts] [--async]\n  repro-pack health\n  repro-pack jobs [--tenant <tenant-id>] [--status <queued|running|succeeded|failed>]\n  repro-pack job --id <job-id> [--tenant <tenant-id>]\n  repro-pack retry-job --id <job-id> [--tenant <tenant-id>]\n  repro-pack pack --ticket <ticket-id> [--tenant <tenant-id>]\n  repro-pack review --ticket <ticket-id> --status <reviewed|approved|rejected> [--tenant <tenant-id>] [--reviewer <name>] [--note <text>]\n  repro-pack sync-issues --ticket <ticket-id> [--tenant <tenant-id>] [--target github] [--target jira] [--write]\n  repro-pack export-issue --ticket <ticket-id> [--tenant <tenant-id>] [--target github|jira]\n"
+      "Usage:\n  repro-pack process --ticket <fixture-id|path> [--tenant <tenant-id>] [--support-ticket-id <id>] [--dry-run] [--write-artifacts] [--async] [--max-attempts <n>]\n  repro-pack health\n  repro-pack jobs [--tenant <tenant-id>] [--status <queued|running|succeeded|failed|dead_lettered>]\n  repro-pack job --id <job-id> [--tenant <tenant-id>]\n  repro-pack retry-job --id <job-id> [--tenant <tenant-id>]\n  repro-pack audit-events [--tenant <tenant-id>] [--action <name>] [--outcome <success|error>] [--ticket <ticket-id>]\n  repro-pack packs [--tenant <tenant-id>] [--status <draft|reviewed|approved|rejected>] [--search <text>] [--sort <updatedAt|createdAt|ticketId|confidence>] [--direction <asc|desc>]\n  repro-pack pack --ticket <ticket-id> [--tenant <tenant-id>]\n  repro-pack review --ticket <ticket-id> --status <reviewed|approved|rejected> [--tenant <tenant-id>] [--reviewer <name>] [--note <text>]\n  repro-pack sync-issues --ticket <ticket-id> [--tenant <tenant-id>] [--target github] [--target jira] [--write]\n  repro-pack export-issue --ticket <ticket-id> [--tenant <tenant-id>] [--target github|jira]\n"
     );
     return;
   }
@@ -58,13 +80,38 @@ async function run() {
       }
     });
     const status = parsed.values.status;
-    if (status && !["queued", "running", "succeeded", "failed"].includes(status)) {
-      throw new Error("--status must be one of queued, running, succeeded, failed");
+    if (status && !["queued", "running", "succeeded", "failed", "dead_lettered"].includes(status)) {
+      throw new Error("--status must be one of queued, running, succeeded, failed, dead_lettered");
     }
 
     const list = await store.listJobs(parsed.values.tenant);
     const filtered = list.filter((job) => !status || job.status === status);
     process.stdout.write(`${JSON.stringify(filtered, null, 2)}\n`);
+    return;
+  }
+
+  if (command === "audit-events") {
+    const parsed = parseArgs({
+      args: rest,
+      options: {
+        tenant: { type: "string" },
+        action: { type: "string" },
+        outcome: { type: "string" },
+        ticket: { type: "string" }
+      }
+    });
+    const outcome = parsed.values.outcome;
+    if (outcome && !["success", "error"].includes(outcome)) {
+      throw new Error("--outcome must be one of success, error");
+    }
+
+    const events = await store.listAuditEvents({
+      tenantId: parsed.values.tenant,
+      action: parsed.values.action,
+      outcome: outcome as "success" | "error" | undefined,
+      ticketId: parsed.values.ticket
+    });
+    process.stdout.write(`${JSON.stringify(events, null, 2)}\n`);
     return;
   }
 
@@ -105,6 +152,50 @@ async function run() {
 
     const job = await jobs.retryFailed(jobId, parsed.values.tenant ?? "default");
     process.stdout.write(`${JSON.stringify(job, null, 2)}\n`);
+    return;
+  }
+
+  if (command === "packs") {
+    const parsed = parseArgs({
+      args: rest,
+      options: {
+        tenant: { type: "string" },
+        status: { type: "string" },
+        search: { type: "string" },
+        sort: { type: "string" },
+        direction: { type: "string" }
+      }
+    });
+    const status = parsed.values.status;
+    const sort = parsed.values.sort ?? "updatedAt";
+    const direction = parsed.values.direction ?? "desc";
+    if (status && !["draft", "reviewed", "approved", "rejected"].includes(status)) {
+      throw new Error("--status must be one of draft, reviewed, approved, rejected");
+    }
+    if (!["updatedAt", "createdAt", "ticketId", "confidence"].includes(sort)) {
+      throw new Error("--sort must be one of updatedAt, createdAt, ticketId, confidence");
+    }
+    if (!["asc", "desc"].includes(direction)) {
+      throw new Error("--direction must be one of asc, desc");
+    }
+
+    const packs = await store.listPacks(parsed.values.tenant);
+    const filtered = sortPacks(
+      packs
+        .filter((pack) => !status || pack.status === status)
+        .filter((pack) => matchesPackSearch(pack, parsed.values.search)),
+      sort,
+      direction
+    ).map((pack) => ({
+      tenantId: pack.tenantId,
+      ticketId: pack.ticketId,
+      status: pack.status,
+      updatedAt: pack.updatedAt,
+      summary: pack.reproPack.summary,
+      confidence: pack.reproPack.confidence.overall,
+      reviewHistoryCount: pack.reviewHistory.length
+    }));
+    process.stdout.write(`${JSON.stringify(filtered, null, 2)}\n`);
     return;
   }
 
@@ -232,7 +323,8 @@ async function run() {
       "support-ticket-id": { type: "string" },
       "dry-run": { type: "boolean" },
       "write-artifacts": { type: "boolean" },
-      async: { type: "boolean" }
+      async: { type: "boolean" },
+      "max-attempts": { type: "string" }
     }
   });
 
@@ -252,7 +344,8 @@ async function run() {
       tenantId,
       supportTicketId,
       dryRun: parsed.values["dry-run"],
-      writeArtifacts: parsed.values["write-artifacts"]
+      writeArtifacts: parsed.values["write-artifacts"],
+      maxAttempts: parsed.values["max-attempts"] ? Number(parsed.values["max-attempts"]) : undefined
     });
     process.stdout.write(`${JSON.stringify(job, null, 2)}\n`);
     return;

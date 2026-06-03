@@ -27,7 +27,7 @@
 Watch for:
 
 - queue jobs stuck in `running`
-- failed jobs that repeatedly fail after explicit retry
+- failed or `dead_lettered` jobs that repeatedly fail after explicit retry
 - repeated provider retry/failure patterns
 - auth failures
 - config errors for missing tenant files or unresolved secrets
@@ -45,6 +45,9 @@ Queue operations:
 - List jobs with `GET /jobs?tenantId=<tenant>&status=failed` or `corepack pnpm cli -- jobs --tenant <tenant> --status failed`
 - Inspect one job with `GET /jobs/:id?tenantId=<tenant>` or `corepack pnpm cli -- job --tenant <tenant> --id <job-id>`
 - Retry only failed jobs with `POST /jobs/:id/retry` or `corepack pnpm cli -- retry-job --tenant <tenant> --id <job-id>`
+- Jobs are dead-lettered after `QUEUE_MAX_ATTEMPTS` by default, or a lower per-job `maxAttempts` when supplied for async processing
+- Dead-lettered jobs are terminal and are intentionally not eligible for retry
+- List audit events with `GET /audit-events?tenantId=<tenant>&action=<action>&outcome=<success|error>` or `corepack pnpm cli -- audit-events --tenant <tenant> --action <action>`
 - Repeated retry failures usually mean the original ticket lookup, tenant config, or provider credentials need correction before retrying again
 
 ## Secret configuration

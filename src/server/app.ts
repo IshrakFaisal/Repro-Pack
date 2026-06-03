@@ -8,6 +8,7 @@ import { enrichContext } from "../enrichment/context-enrichment";
 import { normalizeEvidence } from "../normalization/evidence-normalizer";
 import { createRuntime } from "../runtime/app-runtime";
 import { syncIssuesForPack } from "../issues/issue-sync";
+import type { StoredReproPack } from "../types/schemas";
 
 const ProcessRequestSchema = z
   .object({
@@ -18,7 +19,8 @@ const ProcessRequestSchema = z
     ticket: z.unknown().optional(),
     dryRun: z.boolean().optional(),
     writeArtifacts: z.boolean().optional(),
-    async: z.boolean().optional()
+    async: z.boolean().optional(),
+    maxAttempts: z.number().int().positive().max(25).optional()
   })
   .refine((value) => Boolean(value.fixtureId || value.ticketPath || value.supportTicketId || value.ticket), {
     message: "fixtureId, ticketPath, supportTicketId, or ticket is required"
@@ -29,7 +31,7 @@ const TenantQuerySchema = z.object({
 });
 
 const JobListQuerySchema = TenantQuerySchema.extend({
-  status: z.enum(["queued", "running", "succeeded", "failed"]).optional()
+  status: z.enum(["queued", "running", "succeeded", "failed", "dead_lettered"]).optional()
 });
 
 const JobRetryRequestSchema = z.object({
@@ -38,7 +40,18 @@ const JobRetryRequestSchema = z.object({
 
 const PackListQuerySchema = TenantQuerySchema.extend({
   status: z.enum(["draft", "reviewed", "approved", "rejected"]).optional(),
+  search: z.string().optional(),
+  sort: z.enum(["updatedAt", "createdAt", "ticketId", "confidence"]).default("updatedAt"),
+  direction: z.enum(["asc", "desc"]).default("desc"),
   limit: z.coerce.number().int().min(1).max(100).optional(),
+  offset: z.coerce.number().int().min(0).default(0)
+});
+
+const AuditListQuerySchema = TenantQuerySchema.extend({
+  action: z.string().optional(),
+  outcome: z.enum(["success", "error"]).optional(),
+  ticketId: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
   offset: z.coerce.number().int().min(0).default(0)
 });
 
@@ -93,6 +106,41 @@ function resolveListTenantScope(actor: AuthActor, requestedTenantId: string | un
   }
 
   return resolveTenantScope(actor, requestedTenantId);
+}
+
+function matchesPackSearch(pack: StoredReproPack, search?: string): boolean {
+  if (!search?.trim()) {
+    return true;
+  }
+
+  const needle = search.trim().toLowerCase();
+  return pack.ticketId.toLowerCase().includes(needle) || pack.reproPack.summary.toLowerCase().includes(needle);
+}
+
+function sortPacks(
+  packs: StoredReproPack[],
+  sort: z.infer<typeof PackListQuerySchema>["sort"],
+  direction: z.infer<typeof PackListQuerySchema>["direction"]
+): StoredReproPack[] {
+  const multiplier = direction === "asc" ? 1 : -1;
+  return [...packs].sort((left, right) => {
+    if (sort === "confidence") {
+      return (left.reproPack.confidence.overall - right.reproPack.confidence.overall) * multiplier;
+    }
+
+    const leftValue = sort === "ticketId" ? left.ticketId : sort === "createdAt" ? left.createdAt : left.updatedAt;
+    const rightValue = sort === "ticketId" ? right.ticketId : sort === "createdAt" ? right.createdAt : right.updatedAt;
+    return leftValue.localeCompare(rightValue) * multiplier;
+  });
+}
+
+function providerStatusSummary(pack: StoredReproPack) {
+  return {
+    session: pack.providerResults.session?.status ?? "unavailable",
+    logs: pack.providerResults.logs?.status ?? "unavailable",
+    featureFlags: pack.providerResults.featureFlags?.status ?? "unavailable",
+    release: pack.providerResults.release?.status ?? "unavailable"
+  };
 }
 
 export async function createApp() {
@@ -221,6 +269,19 @@ export async function createApp() {
     return jobsForTenant.filter((job) => !query.status || job.status === query.status);
   });
 
+  app.get("/audit-events", async (request) => {
+    const actor = ensureRole((request as FastifyRequestWithActor).authActor, "read");
+    const query = AuditListQuerySchema.parse(request.query);
+    const tenantId = resolveListTenantScope(actor, query.tenantId);
+    const events = await store.listAuditEvents({
+      tenantId,
+      action: query.action,
+      outcome: query.outcome,
+      ticketId: query.ticketId
+    });
+    return events.slice(query.offset, query.limit ? query.offset + query.limit : undefined);
+  });
+
   app.get("/jobs/:id", async (request, reply) => {
     const actor = ensureRole((request as FastifyRequestWithActor).authActor, "read");
     const params = z.object({ id: z.string() }).parse(request.params);
@@ -250,8 +311,13 @@ export async function createApp() {
     const query = PackListQuerySchema.parse(request.query);
     const tenantId = resolveListTenantScope(actor, query.tenantId);
     const packs = await store.listPacks(tenantId);
-    return packs
+    return sortPacks(
+      packs
       .filter((pack) => !query.status || pack.status === query.status)
+      .filter((pack) => matchesPackSearch(pack, query.search)),
+      query.sort,
+      query.direction
+    )
       .slice(query.offset, query.limit ? query.offset + query.limit : undefined)
       .map((pack) => ({
         tenantId: pack.tenantId,
@@ -260,6 +326,7 @@ export async function createApp() {
         updatedAt: pack.updatedAt,
         summary: pack.reproPack.summary,
         confidence: pack.reproPack.confidence.overall,
+        providerStatus: providerStatusSummary(pack),
         issueLinks: pack.issueLinks,
         reviewHistoryCount: pack.reviewHistory.length,
         lastReview: pack.reviewHistory.at(-1)

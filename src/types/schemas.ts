@@ -239,7 +239,7 @@ export const StoredReproPackSchema = z.object({
   reviewHistory: z.array(ReviewDecisionSchema).default([])
 });
 
-export const ProcessingJobStatusSchema = z.enum(["queued", "running", "succeeded", "failed"]);
+export const ProcessingJobStatusSchema = z.enum(["queued", "running", "succeeded", "failed", "dead_lettered"]);
 
 export const ProcessingJobSchema = z.object({
   jobId: z.string(),
@@ -250,7 +250,10 @@ export const ProcessingJobSchema = z.object({
   dryRun: z.boolean(),
   writeArtifacts: z.boolean(),
   attempts: z.number().int().nonnegative().default(0),
+  maxAttempts: z.number().int().positive().default(3),
+  lastAttemptedAt: z.string().optional(),
   leaseExpiresAt: z.string().optional(),
+  deadLetteredAt: z.string().optional(),
   ticketId: z.string().optional(),
   sourceLookup: z
     .object({

@@ -76,6 +76,7 @@ Core runtime:
 - `MAX_PROVIDER_RETRIES`
 - `QUEUE_POLL_MS`
 - `QUEUE_LEASE_MS`
+- `QUEUE_MAX_ATTEMPTS`
 - `RETENTION_DAYS`
 - `REDACT_IPS`
 - `REDACT_DIRECT_IDENTIFIERS`
@@ -121,6 +122,7 @@ Protected endpoints:
 - `GET /jobs`
 - `GET /jobs/:id`
 - `POST /jobs/:id/retry`
+- `GET /audit-events`
 - `GET /packs`
 - `GET /packs/:ticketId`
 - `POST /packs/:ticketId/review`
@@ -158,6 +160,18 @@ Retry a failed async job:
 
 ```bash
 corepack pnpm cli -- retry-job --tenant acme --id <job-id>
+```
+
+List audit events:
+
+```bash
+corepack pnpm cli -- audit-events --tenant acme --action job.dead_lettered --outcome error
+```
+
+Search packs:
+
+```bash
+corepack pnpm cli -- packs --tenant acme --search checkout --sort confidence --direction desc
 ```
 
 Approve:
@@ -199,7 +213,8 @@ Operational details are in [docs/production-runbook.md](C:\Users\USER\OneDrive\D
 - Dry-run remains the default safe review flow.
 - Audit events are recorded for processing, review, sync, auth failures, and request/config errors.
 - Failed async jobs can be retried explicitly; non-failed jobs are not moved back to the queue.
-- Pack list responses can be filtered by `tenantId` and `status`, and paged with `limit` and `offset`.
+- Repeatedly failing async jobs are dead-lettered after `QUEUE_MAX_ATTEMPTS` or per-job `maxAttempts`.
+- Pack list responses can be filtered by `tenantId`, `status`, and `search`; sorted by `updatedAt`, `createdAt`, `ticketId`, or `confidence`; and paged with `limit` and `offset`.
 - API validation and internal-error responses are sanitized so implementation details are kept in logs, not client payloads.
 
 ## Testing
@@ -218,8 +233,8 @@ The suite covers:
 - local HTTP and async job flows
 - real-adapter style integration tests with mocked Zendesk/GitHub/Jira backends
 - tenant auth behavior and cross-tenant access denial
-- durable job recovery
-- failed job retry, pack filtering, and sanitized API errors
+- durable job recovery and dead-letter transitions
+- failed job retry, audit listing, pack filtering/search/sort, and sanitized API errors
 - optional sandbox test scaffolding when real env vars are present
 
 ## Extending providers

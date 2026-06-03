@@ -54,6 +54,7 @@ export class JobRunner {
       dryRun: Boolean(input.dryRun),
       writeArtifacts: Boolean(input.writeArtifacts),
       attempts: 0,
+      maxAttempts: input.maxAttempts ?? this.config.queueMaxAttempts,
       sourceLookup: {
         fixtureId: input.fixtureId,
         ticketPath: input.ticketPath,
@@ -165,28 +166,32 @@ export class JobRunner {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown job failure";
+      const isDeadLettered = job.attempts >= job.maxAttempts;
+      const terminalStatus = isDeadLettered ? "dead_lettered" : "failed";
+      const timestamp = new Date().toISOString();
       await this.store.saveJob({
         ...job,
-        status: "failed",
-        updatedAt: new Date().toISOString(),
+        status: terminalStatus,
+        updatedAt: timestamp,
         leaseExpiresAt: undefined,
+        deadLetteredAt: isDeadLettered ? timestamp : undefined,
         error: message
       });
       await this.store.recordAuditEvent({
         tenantId: job.tenantId,
         ticketId: job.ticketId,
-        action: "job.failed",
+        action: isDeadLettered ? "job.dead_lettered" : "job.failed",
         outcome: "error",
         actor: job.actor,
-        metadata: { jobId: job.jobId, error: message }
+        metadata: { jobId: job.jobId, error: message, attempts: job.attempts, maxAttempts: job.maxAttempts }
       });
-      this.logger.error({ event: "job.failed", jobId: job.jobId, error: message });
+      this.logger.error({ event: isDeadLettered ? "job.dead_lettered" : "job.failed", jobId: job.jobId, error: message });
       this.metrics.increment("repro_queue_jobs_total", "Queue jobs processed", {
-        status: "failed",
+        status: terminalStatus,
         tenant_id: job.tenantId
       });
       this.metrics.observe("repro_queue_job_duration_ms", "Queue job processing duration in milliseconds", Date.now() - startedAt, {
-        status: "failed",
+        status: terminalStatus,
         tenant_id: job.tenantId
       });
     }

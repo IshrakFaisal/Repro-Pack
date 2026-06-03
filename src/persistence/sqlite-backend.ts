@@ -129,6 +129,14 @@ export class SqlitePersistenceBackend implements PersistenceBackend {
     ).run(payload.tenantId, payload.eventId, payload.timestamp, JSON.stringify(payload));
   }
 
+  async listAuditEvents(tenantId?: string): Promise<AuditEvent[]> {
+    const db = this.requireDb();
+    const rows = tenantId
+      ? db.prepare("SELECT data FROM audit_events WHERE tenant_id = ? ORDER BY timestamp DESC").all(tenantId)
+      : db.prepare("SELECT data FROM audit_events ORDER BY timestamp DESC").all();
+    return rows.map((row) => AuditEventSchema.parse(JSON.parse(row.data ?? "{}")));
+  }
+
   private requireDb(): InstanceType<SqliteModule["DatabaseSync"]> {
     if (!this.db) {
       throw new Error("SQLite backend has not been initialized");

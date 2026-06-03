@@ -22,6 +22,7 @@ export async function createTestSetup() {
     maxProviderRetries: 1,
     queuePollMs: 10,
     queueLeaseMs: 1000,
+    queueMaxAttempts: 3,
     retentionDays: 30,
     redactIps: true,
     redactDirectIdentifiers: true,

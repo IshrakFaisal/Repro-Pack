@@ -77,6 +77,19 @@ export class FilesystemPersistenceBackend implements PersistenceBackend {
     await writeJsonFile(this.auditPath(payload.tenantId, payload.eventId), payload);
   }
 
+  async listAuditEvents(tenantId?: string): Promise<AuditEvent[]> {
+    const root = tenantId ? path.join(this.auditDir, tenantId) : this.auditDir;
+    if (!(await fileExists(root))) {
+      return [];
+    }
+
+    const files = await this.collectJsonFiles(root);
+    const events = await Promise.all(files.map((filePath) => readJsonFile<unknown>(filePath)));
+    return events
+      .map((entry) => AuditEventSchema.parse(entry))
+      .sort((left, right) => right.timestamp.localeCompare(left.timestamp));
+  }
+
   async saveJob(job: ProcessingJob): Promise<void> {
     await ensureDirectory(this.tenantJobDir(job.tenantId));
     await writeJsonFile(this.jobPath(job.tenantId, job.jobId), ProcessingJobSchema.parse(job));
