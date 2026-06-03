@@ -26,7 +26,7 @@ async function run() {
 
   if (!command || command === "help" || command === "--help") {
     process.stdout.write(
-      "Usage:\n  repro-pack process --ticket <fixture-id|path> [--tenant <tenant-id>] [--support-ticket-id <id>] [--dry-run] [--write-artifacts] [--async]\n  repro-pack health\n  repro-pack job --id <job-id> [--tenant <tenant-id>]\n  repro-pack pack --ticket <ticket-id> [--tenant <tenant-id>]\n  repro-pack review --ticket <ticket-id> --status <reviewed|approved|rejected> [--tenant <tenant-id>] [--reviewer <name>] [--note <text>]\n  repro-pack sync-issues --ticket <ticket-id> [--tenant <tenant-id>] [--target github] [--target jira] [--write]\n  repro-pack export-issue --ticket <ticket-id> [--tenant <tenant-id>] [--target github|jira]\n"
+      "Usage:\n  repro-pack process --ticket <fixture-id|path> [--tenant <tenant-id>] [--support-ticket-id <id>] [--dry-run] [--write-artifacts] [--async]\n  repro-pack health\n  repro-pack jobs [--tenant <tenant-id>] [--status <queued|running|succeeded|failed>]\n  repro-pack job --id <job-id> [--tenant <tenant-id>]\n  repro-pack retry-job --id <job-id> [--tenant <tenant-id>]\n  repro-pack pack --ticket <ticket-id> [--tenant <tenant-id>]\n  repro-pack review --ticket <ticket-id> --status <reviewed|approved|rejected> [--tenant <tenant-id>] [--reviewer <name>] [--note <text>]\n  repro-pack sync-issues --ticket <ticket-id> [--tenant <tenant-id>] [--target github] [--target jira] [--write]\n  repro-pack export-issue --ticket <ticket-id> [--tenant <tenant-id>] [--target github|jira]\n"
     );
     return;
   }
@@ -49,6 +49,25 @@ async function run() {
     return;
   }
 
+  if (command === "jobs") {
+    const parsed = parseArgs({
+      args: rest,
+      options: {
+        tenant: { type: "string" },
+        status: { type: "string" }
+      }
+    });
+    const status = parsed.values.status;
+    if (status && !["queued", "running", "succeeded", "failed"].includes(status)) {
+      throw new Error("--status must be one of queued, running, succeeded, failed");
+    }
+
+    const list = await store.listJobs(parsed.values.tenant);
+    const filtered = list.filter((job) => !status || job.status === status);
+    process.stdout.write(`${JSON.stringify(filtered, null, 2)}\n`);
+    return;
+  }
+
   if (command === "job") {
     const parsed = parseArgs({
       args: rest,
@@ -67,6 +86,24 @@ async function run() {
       throw new Error(`Job not found: ${jobId}`);
     }
 
+    process.stdout.write(`${JSON.stringify(job, null, 2)}\n`);
+    return;
+  }
+
+  if (command === "retry-job") {
+    const parsed = parseArgs({
+      args: rest,
+      options: {
+        id: { type: "string" },
+        tenant: { type: "string" }
+      }
+    });
+    const jobId = parsed.values.id;
+    if (!jobId) {
+      throw new Error("--id is required");
+    }
+
+    const job = await jobs.retryFailed(jobId, parsed.values.tenant ?? "default");
     process.stdout.write(`${JSON.stringify(job, null, 2)}\n`);
     return;
   }

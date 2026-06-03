@@ -8,16 +8,21 @@ describe("http endpoints", () => {
   const originalEnv = { ...process.env };
   let dataRoot = "";
   let artifactRoot = "";
+  let tenantRoot = "";
 
   beforeEach(async () => {
     const base = await fs.mkdtemp(path.join(os.tmpdir(), "repro-pack-http-"));
     dataRoot = path.join(base, "data");
     artifactRoot = path.join(base, "artifacts");
+    tenantRoot = path.join(base, "tenants");
     process.env.FIXTURE_ROOT = "fixtures/cases";
     process.env.ARTIFACT_OUTPUT_DIR = artifactRoot;
     process.env.DATA_ROOT = dataRoot;
+    process.env.TENANT_CONFIG_ROOT = tenantRoot;
     process.env.LOG_LEVEL = "silent";
     process.env.API_KEY = "test-api-key";
+    process.env.ALPHA_API_KEY = "alpha-key";
+    process.env.BETA_API_KEY = "beta-key";
   });
 
   afterEach(() => {
@@ -54,6 +59,25 @@ describe("http endpoints", () => {
     await app.close();
 
     expect(response.statusCode).toBe(401);
+  });
+
+  it("returns sanitized validation errors", async () => {
+    const app = await createApp();
+    const response = await app.inject({
+      method: "POST",
+      url: "/tickets/process",
+      headers: { "x-api-key": "test-api-key" },
+      payload: {
+        dryRun: true
+      }
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: "Invalid request payload",
+      code: "validation_error"
+    });
   });
 
   it("processes tickets, persists packs, supports review, and exports approved issues", async () => {
@@ -113,6 +137,66 @@ describe("http endpoints", () => {
     expect(JSON.stringify(debugResponse.json())).not.toContain("refund.user@example.test");
   });
 
+  it("blocks tenant API keys from accessing another tenant scope", async () => {
+    await writeTenantConfig(tenantRoot, "alpha", "ALPHA_API_KEY");
+    await writeTenantConfig(tenantRoot, "beta", "BETA_API_KEY");
+    const app = await createApp();
+    const alphaHeaders = { "x-api-key": "alpha-key", "x-tenant-id": "alpha" };
+
+    const processResponse = await app.inject({
+      method: "POST",
+      url: "/tickets/process",
+      headers: alphaHeaders,
+      payload: {
+        tenantId: "alpha",
+        fixtureId: "backend-trace-correlation",
+        dryRun: true
+      }
+    });
+
+    const ownPackResponse = await app.inject({
+      method: "GET",
+      url: "/packs/backend-trace-correlation?tenantId=alpha",
+      headers: alphaHeaders
+    });
+
+    const crossPackResponse = await app.inject({
+      method: "GET",
+      url: "/packs/backend-trace-correlation?tenantId=beta",
+      headers: alphaHeaders
+    });
+
+    const crossListResponse = await app.inject({
+      method: "GET",
+      url: "/jobs?tenantId=beta",
+      headers: alphaHeaders
+    });
+
+    const crossReviewResponse = await app.inject({
+      method: "POST",
+      url: "/packs/backend-trace-correlation/review",
+      headers: alphaHeaders,
+      payload: {
+        tenantId: "beta",
+        status: "approved"
+      }
+    });
+
+    const globalPackResponse = await app.inject({
+      method: "GET",
+      url: "/packs/backend-trace-correlation?tenantId=alpha",
+      headers: { "x-api-key": "test-api-key" }
+    });
+    await app.close();
+
+    expect(processResponse.statusCode).toBe(200);
+    expect(ownPackResponse.statusCode).toBe(200);
+    expect(crossPackResponse.statusCode).toBe(403);
+    expect(crossListResponse.statusCode).toBe(403);
+    expect(crossReviewResponse.statusCode).toBe(403);
+    expect(globalPackResponse.statusCode).toBe(200);
+  });
+
   it("supports async processing with a persisted job record", async () => {
     const app = await createApp();
     const headers = { "x-api-key": "test-api-key" };
@@ -158,4 +242,151 @@ describe("http endpoints", () => {
       true
     );
   });
+
+  it("lists jobs with status filters and safely retries failed jobs", async () => {
+    const app = await createApp();
+    const headers = { "x-api-key": "test-api-key" };
+
+    const enqueueResponse = await app.inject({
+      method: "POST",
+      url: "/tickets/process",
+      headers,
+      payload: {
+        fixtureId: "missing-fixture",
+        dryRun: true,
+        async: true
+      }
+    });
+
+    expect(enqueueResponse.statusCode).toBe(202);
+    const jobId = enqueueResponse.json().jobId as string;
+    const firstFailure = await waitForJobStatus(app, jobId, "failed", headers);
+
+    const filteredResponse = await app.inject({
+      method: "GET",
+      url: "/jobs?status=failed",
+      headers
+    });
+
+    const retryResponse = await app.inject({
+      method: "POST",
+      url: `/jobs/${jobId}/retry`,
+      headers
+    });
+
+    const secondFailure = await waitForJobStatus(app, jobId, "failed", headers);
+    await app.close();
+
+    expect(firstFailure.attempts).toBe(1);
+    expect(filteredResponse.statusCode).toBe(200);
+    expect(filteredResponse.json().some((item: { jobId: string }) => item.jobId === jobId)).toBe(true);
+    expect(retryResponse.statusCode).toBe(202);
+    expect(retryResponse.json().status).toBe("queued");
+    expect(secondFailure.attempts).toBe(2);
+  });
+
+  it("filters pack summaries and includes review history metadata", async () => {
+    const app = await createApp();
+    const headers = { "x-api-key": "test-api-key" };
+
+    await app.inject({
+      method: "POST",
+      url: "/tickets/process",
+      headers,
+      payload: {
+        fixtureId: "backend-trace-correlation",
+        dryRun: true
+      }
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/tickets/process",
+      headers,
+      payload: {
+        fixtureId: "feature-flag-regression",
+        dryRun: true
+      }
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/packs/backend-trace-correlation/review",
+      headers,
+      payload: {
+        status: "approved",
+        reviewer: "qa@example.test"
+      }
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/packs?status=approved&limit=1&offset=0",
+      headers
+    });
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toHaveLength(1);
+    expect(response.json()[0]).toMatchObject({
+      ticketId: "backend-trace-correlation",
+      status: "approved",
+      reviewHistoryCount: 1,
+      lastReview: {
+        status: "approved",
+        reviewer: "qa@example.test"
+      }
+    });
+  });
 });
+
+async function writeTenantConfig(rootDir: string, tenantId: string, envName: string): Promise<void> {
+  await fs.mkdir(rootDir, { recursive: true });
+  await fs.writeFile(
+    path.join(rootDir, `${tenantId}.json`),
+    JSON.stringify(
+      {
+        tenantId,
+        name: `${tenantId} tenant`,
+        auth: {
+          apiKeys: [
+            {
+              keyId: `${tenantId}-key`,
+              actorId: `${tenantId}-actor`,
+              secret: {
+                provider: "env",
+                env: envName
+              },
+              roles: ["read", "process", "review", "sync"]
+            }
+          ]
+        },
+        providers: {}
+      },
+      null,
+      2
+    )
+  );
+}
+
+async function waitForJobStatus(
+  app: Awaited<ReturnType<typeof createApp>>,
+  jobId: string,
+  expectedStatus: string,
+  headers: Record<string, string>
+): Promise<{ status: string; attempts: number }> {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const response = await app.inject({
+      method: "GET",
+      url: `/jobs/${jobId}`,
+      headers
+    });
+    const job = response.json() as { status: string; attempts: number };
+    if (job.status === expectedStatus) {
+      return job;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  throw new Error(`Job ${jobId} did not reach ${expectedStatus}`);
+}

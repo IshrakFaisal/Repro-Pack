@@ -1,3 +1,5 @@
+import { ZodError } from "zod";
+
 export class AppError extends Error {
   constructor(
     message: string,
@@ -9,6 +11,10 @@ export class AppError extends Error {
 }
 
 export function classifyError(error: unknown): { code: string; message: string; statusCode: number } {
+  if (error instanceof ZodError) {
+    return { code: "validation_error", message: "Invalid request payload", statusCode: 400 };
+  }
+
   if (error instanceof AppError) {
     return { code: error.code, message: error.message, statusCode: error.statusCode };
   }
@@ -22,8 +28,8 @@ export function classifyError(error: unknown): { code: string; message: string; 
   }
 
   if (error instanceof Error) {
-    return { code: "internal_error", message: error.message, statusCode: 500 };
+    return { code: "internal_error", message: "Internal server error", statusCode: 500 };
   }
 
-  return { code: "internal_error", message: "Unknown error", statusCode: 500 };
+  return { code: "internal_error", message: "Internal server error", statusCode: 500 };
 }

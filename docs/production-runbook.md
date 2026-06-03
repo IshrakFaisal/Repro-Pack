@@ -27,10 +27,25 @@
 Watch for:
 
 - queue jobs stuck in `running`
+- failed jobs that repeatedly fail after explicit retry
 - repeated provider retry/failure patterns
 - auth failures
 - config errors for missing tenant files or unresolved secrets
 - issue sync create/update spikes
+
+Useful metrics:
+
+- `repro_processing_duration_ms` for end-to-end ticket processing duration by tenant and outcome
+- `repro_provider_fetch_total`, `repro_provider_fetch_latency_ms`, and `repro_provider_failures_total` for context-provider health
+- `repro_queue_jobs_total`, `repro_queue_job_duration_ms`, and `repro_queue_job_retries_total` for async queue throughput and retry activity
+- `repro_issue_sync_total` for GitHub/Jira preview, create, update, missing-config, and failure outcomes
+
+Queue operations:
+
+- List jobs with `GET /jobs?tenantId=<tenant>&status=failed` or `corepack pnpm cli -- jobs --tenant <tenant> --status failed`
+- Inspect one job with `GET /jobs/:id?tenantId=<tenant>` or `corepack pnpm cli -- job --tenant <tenant> --id <job-id>`
+- Retry only failed jobs with `POST /jobs/:id/retry` or `corepack pnpm cli -- retry-job --tenant <tenant> --id <job-id>`
+- Repeated retry failures usually mean the original ticket lookup, tenant config, or provider credentials need correction before retrying again
 
 ## Secret configuration
 
@@ -61,3 +76,5 @@ Add the provider implementation in [src/secrets/manager.ts](C:\Users\USER\OneDri
 - Re-run a ticket safely through preview mode before approving sync
 - Audit logs capture processing, review, sync, auth failures, and request/config errors
 - If provider credentials rotate, restart the service after secret updates when using env-backed secrets
+- Tenant-scoped API keys cannot access another tenant's jobs, packs, reviews, exports, debug lookups, or issue sync flow; use the global key only for controlled operations/admin workflows
+- Client-facing validation and internal error payloads are sanitized; inspect server logs and audit events for detailed failure context

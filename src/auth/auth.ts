@@ -68,3 +68,17 @@ export function ensureRole(actor: AuthActor | undefined, role: AuthRole): AuthAc
 
   return actor;
 }
+
+export function ensureTenantAccess(actor: AuthActor, tenantId: string): void {
+  if (actor.authMethod === "global-api-key") {
+    return;
+  }
+
+  if (actor.tenantId === tenantId) {
+    return;
+  }
+
+  const error = new Error("Forbidden");
+  (error as Error & { statusCode?: number }).statusCode = 403;
+  throw error;
+}

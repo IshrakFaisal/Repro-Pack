@@ -4,6 +4,7 @@ import type { AppConfig } from "../config/env";
 import { AuditEventSchema, type AuditEvent, type IssueLink, type IssueTarget } from "../types/integrations";
 import {
   ProcessingJobSchema,
+  ProcessingJobStatusSchema,
   ReviewDecisionSchema,
   StoredReproPackSchema,
   type IssueDraft,
@@ -52,6 +53,27 @@ export class ReproStore {
 
   async listJobs(tenantId?: string): Promise<ProcessingJob[]> {
     return this.backend.listJobs(tenantId);
+  }
+
+  async retryFailedJob(input: { jobId: string; tenantId: string }): Promise<ProcessingJob> {
+    const existing = await this.getJob(input.jobId, input.tenantId);
+    if (!existing) {
+      throw new Error(`Job not found: ${input.jobId}`);
+    }
+
+    if (existing.status !== "failed") {
+      throw new Error("Only failed jobs can be retried");
+    }
+
+    const retried = ProcessingJobSchema.parse({
+      ...existing,
+      status: ProcessingJobStatusSchema.enum.queued,
+      updatedAt: nowIso(),
+      leaseExpiresAt: undefined,
+      error: undefined
+    });
+    await this.saveJob(retried);
+    return retried;
   }
 
   async claimNextJob(): Promise<ProcessingJob | undefined> {

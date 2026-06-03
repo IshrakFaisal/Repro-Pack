@@ -118,7 +118,9 @@ Public endpoints:
 Protected endpoints:
 
 - `POST /tickets/process`
+- `GET /jobs`
 - `GET /jobs/:id`
+- `POST /jobs/:id/retry`
 - `GET /packs`
 - `GET /packs/:ticketId`
 - `POST /packs/:ticketId/review`
@@ -130,6 +132,7 @@ Auth options:
 
 - global `API_KEY` for local/dev fallback
 - tenant-scoped API keys from tenant config for production use
+- tenant-scoped API keys can only read or mutate their own tenant; the global key can inspect all tenants for operations work
 
 ## CLI
 
@@ -143,6 +146,18 @@ Zendesk:
 
 ```bash
 corepack pnpm cli -- process --tenant acme --support-ticket-id 12345 --dry-run
+```
+
+List jobs:
+
+```bash
+corepack pnpm cli -- jobs --tenant acme --status failed
+```
+
+Retry a failed async job:
+
+```bash
+corepack pnpm cli -- retry-job --tenant acme --id <job-id>
 ```
 
 Approve:
@@ -183,6 +198,9 @@ Operational details are in [docs/production-runbook.md](C:\Users\USER\OneDrive\D
 - Jira sync re-discovers issues by stored link and marker search.
 - Dry-run remains the default safe review flow.
 - Audit events are recorded for processing, review, sync, auth failures, and request/config errors.
+- Failed async jobs can be retried explicitly; non-failed jobs are not moved back to the queue.
+- Pack list responses can be filtered by `tenantId` and `status`, and paged with `limit` and `offset`.
+- API validation and internal-error responses are sanitized so implementation details are kept in logs, not client payloads.
 
 ## Testing
 
@@ -199,8 +217,9 @@ The suite covers:
 - markdown/json artifact generation
 - local HTTP and async job flows
 - real-adapter style integration tests with mocked Zendesk/GitHub/Jira backends
-- tenant auth behavior
+- tenant auth behavior and cross-tenant access denial
 - durable job recovery
+- failed job retry, pack filtering, and sanitized API errors
 - optional sandbox test scaffolding when real env vars are present
 
 ## Extending providers

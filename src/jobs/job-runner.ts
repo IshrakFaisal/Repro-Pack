@@ -68,6 +68,23 @@ export class JobRunner {
     return job;
   }
 
+  async retryFailed(jobId: string, tenantId: string, actor?: ProcessingJob["actor"]): Promise<ProcessingJob> {
+    const job = await this.store.retryFailedJob({ jobId, tenantId });
+    await this.store.recordAuditEvent({
+      tenantId,
+      ticketId: job.ticketId,
+      action: "job.retried",
+      outcome: "success",
+      actor,
+      metadata: { jobId, attempts: job.attempts }
+    });
+    this.metrics.increment("repro_queue_job_retries_total", "Failed queue jobs retried", {
+      tenant_id: tenantId
+    });
+    void this.drain();
+    return job;
+  }
+
   private async drain(): Promise<void> {
     if (this.isRunning) {
       return;
@@ -89,6 +106,7 @@ export class JobRunner {
   }
 
   private async runJob(job: ProcessingJob): Promise<void> {
+    const startedAt = Date.now();
     this.logger.info({ event: "job.started", jobId: job.jobId, tenantId: job.tenantId }, "Started queued job");
     this.metrics.increment("repro_queue_jobs_total", "Queue jobs processed", {
       status: "running",
@@ -141,6 +159,10 @@ export class JobRunner {
         status: "succeeded",
         tenant_id: job.tenantId
       });
+      this.metrics.observe("repro_queue_job_duration_ms", "Queue job processing duration in milliseconds", Date.now() - startedAt, {
+        status: "succeeded",
+        tenant_id: job.tenantId
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown job failure";
       await this.store.saveJob({
@@ -160,6 +182,10 @@ export class JobRunner {
       });
       this.logger.error({ event: "job.failed", jobId: job.jobId, error: message });
       this.metrics.increment("repro_queue_jobs_total", "Queue jobs processed", {
+        status: "failed",
+        tenant_id: job.tenantId
+      });
+      this.metrics.observe("repro_queue_job_duration_ms", "Queue job processing duration in milliseconds", Date.now() - startedAt, {
         status: "failed",
         tenant_id: job.tenantId
       });

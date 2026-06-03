@@ -44,6 +44,11 @@ export async function syncIssuesForPack(input: {
   for (const target of input.targets) {
     const tracker = input.providers.issueTrackers[target];
     if (!tracker) {
+      input.metrics?.increment("repro_issue_sync_total", "External issue sync attempts", {
+        tenant_id: input.tenantId,
+        target,
+        status: "not_configured"
+      });
       results.push({
         target,
         status: "preview",
@@ -56,13 +61,23 @@ export async function syncIssuesForPack(input: {
     }
 
     const existingLink = pack.issueLinks.find((link) => link.target === target);
-    const synced = await tracker.sync({
-      tenantId: input.tenantId,
-      ticket,
-      issueDraft: pack.issueDraft,
-      existingLink,
-      dryRun: input.dryRun
-    });
+    let synced;
+    try {
+      synced = await tracker.sync({
+        tenantId: input.tenantId,
+        ticket,
+        issueDraft: pack.issueDraft,
+        existingLink,
+        dryRun: input.dryRun
+      });
+    } catch (error) {
+      input.metrics?.increment("repro_issue_sync_total", "External issue sync attempts", {
+        tenant_id: input.tenantId,
+        target,
+        status: "failed"
+      });
+      throw error;
+    }
 
     if (!input.dryRun) {
       await input.store.saveIssueLink({

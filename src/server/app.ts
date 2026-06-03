@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 import { z } from "zod";
-import { ensureRole, authenticateRequest, type AuthActor } from "../auth/auth";
+import { ensureRole, authenticateRequest, ensureTenantAccess, type AuthActor } from "../auth/auth";
 import { classifyError } from "../observability/errors";
 import { processTicket } from "../pipeline/process-ticket";
 import { ingestTicket } from "../ingestion/ticket-ingestion";
@@ -26,6 +26,20 @@ const ProcessRequestSchema = z
 
 const TenantQuerySchema = z.object({
   tenantId: z.string().optional()
+});
+
+const JobListQuerySchema = TenantQuerySchema.extend({
+  status: z.enum(["queued", "running", "succeeded", "failed"]).optional()
+});
+
+const JobRetryRequestSchema = z.object({
+  tenantId: z.string().optional()
+});
+
+const PackListQuerySchema = TenantQuerySchema.extend({
+  status: z.enum(["draft", "reviewed", "approved", "rejected"]).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  offset: z.coerce.number().int().min(0).default(0)
 });
 
 const ReviewRequestSchema = z.object({
@@ -62,6 +76,23 @@ function tenantIdFromRequest(request: { headers: Record<string, unknown>; body?:
   }
 
   return undefined;
+}
+
+function resolveTenantScope(
+  actor: AuthActor,
+  requestedTenantId: string | undefined
+): string {
+  const tenantId = requestedTenantId ?? actor.tenantId;
+  ensureTenantAccess(actor, tenantId);
+  return tenantId;
+}
+
+function resolveListTenantScope(actor: AuthActor, requestedTenantId: string | undefined): string | undefined {
+  if (!requestedTenantId && actor.authMethod === "global-api-key") {
+    return undefined;
+  }
+
+  return resolveTenantScope(actor, requestedTenantId);
 }
 
 export async function createApp() {
@@ -121,11 +152,12 @@ export async function createApp() {
   app.post("/tickets/process", async (request, reply) => {
     const actor = ensureRole((request as FastifyRequestWithActor).authActor, "process");
     const body = ProcessRequestSchema.parse(request.body);
+    const tenantId = resolveTenantScope(actor, body.tenantId);
 
     if (body.async) {
-      const job = await jobs.enqueue({ ...body, actor });
+      const job = await jobs.enqueue({ ...body, tenantId, actor });
       await store.recordAuditEvent({
-        tenantId: body.tenantId ?? actor.tenantId,
+        tenantId,
         action: "ticket.processing.enqueued",
         outcome: "success",
         actor,
@@ -135,9 +167,8 @@ export async function createApp() {
       return;
     }
 
-    const providerSet = await providers.create({ tenantId: body.tenantId });
-    const result = await processTicket(body, providerSet, logger, metrics);
-    const tenantId = body.tenantId ?? actor.tenantId;
+    const providerSet = await providers.create({ tenantId });
+    const result = await processTicket({ ...body, tenantId }, providerSet, logger, metrics);
     const storedPack = await jobs.persistSynchronousResult({
       tenantId,
       ticketId: result.ticket.ticketId,
@@ -182,11 +213,19 @@ export async function createApp() {
     });
   });
 
+  app.get("/jobs", async (request) => {
+    const actor = ensureRole((request as FastifyRequestWithActor).authActor, "read");
+    const query = JobListQuerySchema.parse(request.query);
+    const tenantId = resolveListTenantScope(actor, query.tenantId);
+    const jobsForTenant = await store.listJobs(tenantId);
+    return jobsForTenant.filter((job) => !query.status || job.status === query.status);
+  });
+
   app.get("/jobs/:id", async (request, reply) => {
-    ensureRole((request as FastifyRequestWithActor).authActor, "read");
+    const actor = ensureRole((request as FastifyRequestWithActor).authActor, "read");
     const params = z.object({ id: z.string() }).parse(request.params);
     const query = TenantQuerySchema.parse(request.query);
-    const tenantId = query.tenantId ?? "default";
+    const tenantId = resolveTenantScope(actor, query.tenantId);
     const job = await store.getJob(params.id, tenantId);
 
     if (!job) {
@@ -197,26 +236,42 @@ export async function createApp() {
     reply.send(job);
   });
 
+  app.post("/jobs/:id/retry", async (request, reply) => {
+    const actor = ensureRole((request as FastifyRequestWithActor).authActor, "process");
+    const params = z.object({ id: z.string() }).parse(request.params);
+    const body = JobRetryRequestSchema.parse(request.body ?? {});
+    const tenantId = resolveTenantScope(actor, body.tenantId);
+    const job = await jobs.retryFailed(params.id, tenantId, actor);
+    reply.status(202).send(job);
+  });
+
   app.get("/packs", async (request) => {
-    ensureRole((request as FastifyRequestWithActor).authActor, "read");
-    const query = TenantQuerySchema.parse(request.query);
-    const packs = await store.listPacks(query.tenantId);
-    return packs.map((pack) => ({
-      tenantId: pack.tenantId,
-      ticketId: pack.ticketId,
-      status: pack.status,
-      updatedAt: pack.updatedAt,
-      summary: pack.reproPack.summary,
-      confidence: pack.reproPack.confidence.overall,
-      issueLinks: pack.issueLinks
-    }));
+    const actor = ensureRole((request as FastifyRequestWithActor).authActor, "read");
+    const query = PackListQuerySchema.parse(request.query);
+    const tenantId = resolveListTenantScope(actor, query.tenantId);
+    const packs = await store.listPacks(tenantId);
+    return packs
+      .filter((pack) => !query.status || pack.status === query.status)
+      .slice(query.offset, query.limit ? query.offset + query.limit : undefined)
+      .map((pack) => ({
+        tenantId: pack.tenantId,
+        ticketId: pack.ticketId,
+        status: pack.status,
+        updatedAt: pack.updatedAt,
+        summary: pack.reproPack.summary,
+        confidence: pack.reproPack.confidence.overall,
+        issueLinks: pack.issueLinks,
+        reviewHistoryCount: pack.reviewHistory.length,
+        lastReview: pack.reviewHistory.at(-1)
+      }));
   });
 
   app.get("/packs/:ticketId", async (request, reply) => {
-    ensureRole((request as FastifyRequestWithActor).authActor, "read");
+    const actor = ensureRole((request as FastifyRequestWithActor).authActor, "read");
     const params = z.object({ ticketId: z.string() }).parse(request.params);
     const query = TenantQuerySchema.parse(request.query);
-    const pack = await store.getPack(params.ticketId, query.tenantId ?? "default");
+    const tenantId = resolveTenantScope(actor, query.tenantId);
+    const pack = await store.getPack(params.ticketId, tenantId);
 
     if (!pack) {
       reply.status(404).send({ error: "Repro pack not found" });
@@ -230,8 +285,9 @@ export async function createApp() {
     const actor = ensureRole((request as FastifyRequestWithActor).authActor, "review");
     const params = z.object({ ticketId: z.string() }).parse(request.params);
     const body = ReviewRequestSchema.parse(request.body);
+    const tenantId = resolveTenantScope(actor, body.tenantId);
     const updated = await store.reviewPack({
-      tenantId: body.tenantId ?? actor.tenantId,
+      tenantId,
       ticketId: params.ticketId,
       status: body.status,
       reviewer: body.reviewer ?? actor.actorId,
@@ -246,7 +302,7 @@ export async function createApp() {
     const actor = ensureRole((request as FastifyRequestWithActor).authActor, "sync");
     const params = z.object({ ticketId: z.string() }).parse(request.params);
     const body = IssueSyncRequestSchema.parse(request.body);
-    const tenantId = body.tenantId ?? actor.tenantId;
+    const tenantId = resolveTenantScope(actor, body.tenantId);
     const providerSet = await providers.create({ tenantId });
     const results = await syncIssuesForPack({
       tenantId,
@@ -271,28 +327,34 @@ export async function createApp() {
     const actor = ensureRole((request as FastifyRequestWithActor).authActor, "read");
     const params = z.object({ ticketId: z.string() }).parse(request.params);
     const body = z.object({ tenantId: z.string().optional(), target: z.enum(["github", "jira"]).optional() }).parse(request.body ?? {});
-    const issuePath = await store.exportIssueDraft(params.ticketId, body.tenantId ?? actor.tenantId, body.target ?? "github");
+    const tenantId = resolveTenantScope(actor, body.tenantId);
+    const issuePath = await store.exportIssueDraft(params.ticketId, tenantId, body.target ?? "github");
     reply.send({
-      tenantId: body.tenantId ?? actor.tenantId,
+      tenantId,
       ticketId: params.ticketId,
       issuePath
     });
   });
 
   app.get("/debug/ticket/:id", async (request) => {
-    ensureRole((request as FastifyRequestWithActor).authActor, "read");
+    const actor = ensureRole((request as FastifyRequestWithActor).authActor, "read");
     const params = z.object({ id: z.string() }).parse(request.params);
     const query = TenantQuerySchema.parse(request.query);
-    const providerSet = await providers.create({ tenantId: query.tenantId });
+    const tenantId = query.tenantId
+      ? resolveTenantScope(actor, query.tenantId)
+      : actor.authMethod === "global-api-key"
+        ? undefined
+        : resolveTenantScope(actor, undefined);
+    const providerSet = await providers.create({ tenantId });
     const ticket = await ingestTicket(
-      query.tenantId ? { tenantId: query.tenantId, supportTicketId: params.id } : { fixtureId: params.id },
+      tenantId ? { tenantId, supportTicketId: params.id } : { fixtureId: params.id },
       providerSet
     );
     const context = await enrichContext(ticket, providerSet);
     const normalized = normalizeEvidence(context);
 
     return {
-      tenantId: query.tenantId ?? "default",
+      tenantId: tenantId ?? "default",
       ticket,
       providerStatus: {
         session: {
