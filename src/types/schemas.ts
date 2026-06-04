@@ -199,6 +199,34 @@ export const ComplianceSummarySchema = z.object({
   customerConsentConfirmed: z.boolean().default(false)
 });
 
+export const AutomatedTestScaffoldSchema = z.object({
+  framework: z.string().default("not available"),
+  language: z.string().default("TypeScript"),
+  fileHint: z.string().default("not available"),
+  skeleton: z.array(z.string()).default([]),
+  assertions: z.array(z.string()).default([])
+});
+
+export const SimilarBugHintSchema = z.object({
+  signal: z.string(),
+  rationale: z.string(),
+  confidence: z.number().min(0).max(1)
+});
+
+export const BlameAssigneeSuggestionSchema = z
+  .object({
+    assignee: z.string().default("not available"),
+    rationale: z.string().default("No ownership signal was available."),
+    files: z.array(z.string()).default([]),
+    confidence: z.number().min(0).max(1).default(0)
+  })
+  .default({});
+
+export const FixValidationChecklistItemSchema = z.object({
+  item: z.string(),
+  source: z.enum(["repro_step", "evidence", "regression", "sanitization"]).default("evidence")
+});
+
 export const ConfidenceScoreSchema = z.object({
   overall: z.number().min(0).max(1),
   reasoning: z.string(),
@@ -248,6 +276,10 @@ export const ReproPackSchema = z.object({
   }),
   redactionAuditReport: RedactionAuditReportSchema.nullable().default(null),
   compliance: ComplianceSummarySchema.default({}),
+  automatedTestScaffold: AutomatedTestScaffoldSchema.default({}),
+  similarBugHints: z.array(SimilarBugHintSchema).default([]),
+  blameAssigneeSuggestion: BlameAssigneeSuggestionSchema,
+  fixValidationChecklist: z.array(FixValidationChecklistItemSchema).default([]),
   llmSuggestions: LlmSuggestionsSchema
 });
 
@@ -348,6 +380,10 @@ export type EnvironmentDelta = z.infer<typeof EnvironmentDeltaSchema>;
 export type RegressionClassification = z.infer<typeof RegressionClassificationSchema>;
 export type RedactionAuditReport = z.infer<typeof RedactionAuditReportSchema>;
 export type ComplianceSummary = z.infer<typeof ComplianceSummarySchema>;
+export type AutomatedTestScaffold = z.infer<typeof AutomatedTestScaffoldSchema>;
+export type SimilarBugHint = z.infer<typeof SimilarBugHintSchema>;
+export type BlameAssigneeSuggestion = z.infer<typeof BlameAssigneeSuggestionSchema>;
+export type FixValidationChecklistItem = z.infer<typeof FixValidationChecklistItemSchema>;
 export type ConfidenceScore = z.infer<typeof ConfidenceScoreSchema>;
 export type LlmSuggestions = z.infer<typeof LlmSuggestionsSchema>;
 export type ReproPack = z.infer<typeof ReproPackSchema>;

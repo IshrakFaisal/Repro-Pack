@@ -49,7 +49,7 @@ async function run() {
 
   if (!command || command === "help" || command === "--help") {
     process.stdout.write(
-      "Usage:\n  repro-pack process --ticket <fixture-id|path> [--tenant <tenant-id>] [--support-ticket-id <id>] [--dry-run] [--write-artifacts] [--async] [--max-attempts <n>] [--customer-consent-confirmed]\n  repro-pack health\n  repro-pack jobs [--tenant <tenant-id>] [--status <queued|running|succeeded|failed|dead_lettered>]\n  repro-pack job --id <job-id> [--tenant <tenant-id>]\n  repro-pack retry-job --id <job-id> [--tenant <tenant-id>]\n  repro-pack cleanup [--tenant <tenant-id>] [--write]\n  repro-pack audit-events [--tenant <tenant-id>] [--action <name>] [--outcome <success|error>] [--ticket <ticket-id>]\n  repro-pack packs [--tenant <tenant-id>] [--status <draft|reviewed|approved|rejected>] [--search <text>] [--sort <updatedAt|createdAt|ticketId|confidence>] [--direction <asc|desc>]\n  repro-pack pack --ticket <ticket-id> [--tenant <tenant-id>]\n  repro-pack review --ticket <ticket-id> --status <reviewed|approved|rejected> [--tenant <tenant-id>] [--reviewer <name>] [--note <text>]\n  repro-pack sync-issues --ticket <ticket-id> [--tenant <tenant-id>] [--target github] [--target jira] [--write]\n  repro-pack export-issue --ticket <ticket-id> [--tenant <tenant-id>] [--target github|jira]\n"
+      "Usage:\n  repro-pack process --ticket <fixture-id|path> [--tenant <tenant-id>] [--support-ticket-id <id>] [--dry-run] [--write-artifacts] [--async] [--max-attempts <n>] [--customer-consent-confirmed]\n  repro-pack health\n  repro-pack jobs [--tenant <tenant-id>] [--status <queued|running|succeeded|failed|dead_lettered>]\n  repro-pack job --id <job-id> [--tenant <tenant-id>]\n  repro-pack retry-job --id <job-id> [--tenant <tenant-id>]\n  repro-pack cleanup [--tenant <tenant-id>] [--write]\n  repro-pack audit-events [--tenant <tenant-id>] [--action <name>] [--outcome <success|error>] [--ticket <ticket-id>]\n  repro-pack packs [--tenant <tenant-id>] [--status <draft|reviewed|approved|rejected>] [--search <text>] [--sort <updatedAt|createdAt|ticketId|confidence>] [--direction <asc|desc>]\n  repro-pack pack --ticket <ticket-id> [--tenant <tenant-id>]\n  repro-pack review --ticket <ticket-id> --status <reviewed|approved|rejected> [--tenant <tenant-id>] [--reviewer <name>] [--note <text>]\n  repro-pack sync-issues --ticket <ticket-id> [--tenant <tenant-id>] [--target github] [--target jira] [--target linear] [--write]\n  repro-pack export-issue --ticket <ticket-id> [--tenant <tenant-id>] [--target github|jira|linear]\n"
     );
     return;
   }
@@ -293,8 +293,9 @@ async function run() {
     const tenantId = parsed.values.tenant ?? "default";
     const providerSet = await providers.create({ tenantId });
     const targets =
-      (parsed.values.target?.filter((entry): entry is "github" | "jira" => entry === "github" || entry === "jira") ??
-        ["github", "jira"]);
+      (parsed.values.target?.filter(
+        (entry): entry is "github" | "jira" | "linear" => entry === "github" || entry === "jira" || entry === "linear"
+      ) ?? ["github", "jira"]);
     const results = await syncIssuesForPack({
       tenantId,
       ticketId,
@@ -324,7 +325,7 @@ async function run() {
     const issuePath = await store.exportIssueDraft(
       ticketId,
       parsed.values.tenant ?? "default",
-      parsed.values.target === "jira" ? "jira" : "github"
+      parsed.values.target === "jira" || parsed.values.target === "linear" ? parsed.values.target : "github"
     );
     process.stdout.write(
       `${JSON.stringify({ tenantId: parsed.values.tenant ?? "default", ticketId, issuePath }, null, 2)}\n`

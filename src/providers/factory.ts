@@ -6,12 +6,16 @@ import type { FeatureFlagContext, LogsContext, ProviderResultOf, ReleaseInfo, Se
 import type { ProviderRegistry, ProviderSet } from "./interfaces";
 import {
   createHttpClient,
+  DatadogLogsProvider,
   GitHubIssueTracker,
   HttpFeatureFlagProvider,
   HttpLogsProvider,
   HttpReleaseProvider,
   HttpSessionProvider,
+  IntercomSupportProvider,
   JiraIssueTracker,
+  LinearIssueTracker,
+  SentryLogsProvider,
   ZendeskSupportProvider
 } from "./http-integration-providers";
 import {
@@ -123,10 +127,18 @@ export class AppProviderRegistry implements ProviderRegistry {
     return {
       config: this.config,
       tenant,
-      support: tenant.providers.support
-        ? new ZendeskSupportProvider(tenant, client)
-        : new FixtureSupportProvider(this.config.fixtureRoot),
-      logs: tenant.providers.logs ? new HttpLogsProvider(tenant, client) : new UnavailableLogsProvider(),
+      support: tenant.providers.intercom
+        ? new IntercomSupportProvider(tenant, client)
+        : tenant.providers.support
+          ? new ZendeskSupportProvider(tenant, client)
+          : new FixtureSupportProvider(this.config.fixtureRoot),
+      logs: tenant.providers.sentry
+        ? new SentryLogsProvider(tenant, client)
+        : tenant.providers.datadog
+          ? new DatadogLogsProvider(tenant, client)
+          : tenant.providers.logs
+            ? new HttpLogsProvider(tenant, client)
+            : new UnavailableLogsProvider(),
       featureFlags: tenant.providers.featureFlags
         ? new HttpFeatureFlagProvider(tenant, client)
         : new UnavailableFeatureFlagProvider(),
@@ -134,7 +146,8 @@ export class AppProviderRegistry implements ProviderRegistry {
       session: tenant.providers.session ? new HttpSessionProvider(tenant, client) : new UnavailableSessionProvider(),
       issueTrackers: {
         github: tenant.providers.github ? new GitHubIssueTracker(tenant, client) : undefined,
-        jira: tenant.providers.jira ? new JiraIssueTracker(tenant, client) : undefined
+        jira: tenant.providers.jira ? new JiraIssueTracker(tenant, client) : undefined,
+        linear: tenant.providers.linear ? new LinearIssueTracker(tenant, client) : undefined
       },
       notifications: {
         slack: tenant.providers.slack?.enabled ? new SlackNotificationProvider(tenant, this.config, this.logger) : undefined

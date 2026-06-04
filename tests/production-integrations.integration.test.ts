@@ -23,6 +23,14 @@ type JiraIssue = {
   };
 };
 
+type LinearIssue = {
+  id: string;
+  identifier: string;
+  url: string;
+  title: string;
+  description: string;
+};
+
 type MockServerState = Awaited<ReturnType<typeof startMockServer>>["state"];
 
 function readJsonBody(request: http.IncomingMessage): Promise<unknown> {
@@ -43,8 +51,11 @@ async function startMockServer() {
   let githubUpdateCount = 0;
   let jiraCreateCount = 0;
   let jiraUpdateCount = 0;
+  let linearCreateCount = 0;
+  let linearUpdateCount = 0;
   const githubIssues: GitHubIssue[] = [];
   const jiraIssues: JiraIssue[] = [];
+  const linearIssues: LinearIssue[] = [];
 
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -242,6 +253,58 @@ async function startMockServer() {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/graphql") {
+      const body = (await readJsonBody(request)) as {
+        query: string;
+        variables?: Record<string, unknown>;
+      };
+
+      if (body.query.includes("ExistingReproIssue")) {
+        const marker = String(body.variables?.marker ?? "");
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            data: {
+              issues: {
+                nodes: linearIssues.filter((issue) => issue.description.includes(marker))
+              }
+            }
+          })
+        );
+        return;
+      }
+
+      if (body.query.includes("CreateReproIssue")) {
+        const input = body.variables?.input as { title: string; description: string };
+        linearCreateCount += 1;
+        const issue: LinearIssue = {
+          id: `linear-${linearIssues.length + 1}`,
+          identifier: `RP-${linearIssues.length + 1}`,
+          url: `https://linear.example/RP-${linearIssues.length + 1}`,
+          title: input.title,
+          description: input.description
+        };
+        linearIssues.push(issue);
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ data: { issueCreate: { success: true, issue } } }));
+        return;
+      }
+
+      if (body.query.includes("UpdateReproIssue")) {
+        const id = String(body.variables?.id ?? "");
+        const input = body.variables?.input as { title: string; description: string };
+        linearUpdateCount += 1;
+        const issue = linearIssues.find((entry) => entry.id === id);
+        if (issue) {
+          issue.title = input.title;
+          issue.description = input.description;
+        }
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ data: { issueUpdate: { success: true, issue } } }));
+        return;
+      }
+    }
+
     response.writeHead(404, { "content-type": "application/json" });
     response.end(JSON.stringify({ error: "not_found", path: url.pathname }));
   });
@@ -271,8 +334,15 @@ async function startMockServer() {
       get jiraUpdateCount() {
         return jiraUpdateCount;
       },
+      get linearCreateCount() {
+        return linearCreateCount;
+      },
+      get linearUpdateCount() {
+        return linearUpdateCount;
+      },
       githubIssues,
-      jiraIssues
+      jiraIssues,
+      linearIssues
     }
   };
 }
@@ -304,6 +374,7 @@ describe("production integration workflow", () => {
     process.env.TEST_GITHUB_TOKEN = "github-token";
     process.env.TEST_JIRA_EMAIL = "jira@example.test";
     process.env.TEST_JIRA_TOKEN = "jira-token";
+    process.env.TEST_LINEAR_TOKEN = "linear-token";
 
     await fs.writeFile(
       path.join(tenantRoot, "acme.json"),
@@ -354,6 +425,12 @@ describe("production integration workflow", () => {
               issueType: "Bug",
               email: { env: "TEST_JIRA_EMAIL" },
               apiToken: { env: "TEST_JIRA_TOKEN" }
+            },
+            linear: {
+              type: "linear",
+              baseUrl: `${mock.baseUrl}/graphql`,
+              teamId: "team-acme",
+              token: { env: "TEST_LINEAR_TOKEN" }
             }
           }
         },
@@ -402,13 +479,14 @@ describe("production integration workflow", () => {
       payload: {
         tenantId: "acme",
         dryRun: true,
-        targets: ["github", "jira"]
+        targets: ["github", "jira", "linear"]
       }
     });
     expect(previewSync.statusCode).toBe(200);
     expect(previewSync.json().results.every((entry: { status: string }) => entry.status === "preview")).toBe(true);
     expect(mockState.githubCreateCount).toBe(0);
     expect(mockState.jiraCreateCount).toBe(0);
+    expect(mockState.linearCreateCount).toBe(0);
 
     const reviewResponse = await app.inject({
       method: "POST",
@@ -430,12 +508,13 @@ describe("production integration workflow", () => {
       payload: {
         tenantId: "acme",
         dryRun: false,
-        targets: ["github", "jira"]
+        targets: ["github", "jira", "linear"]
       }
     });
     expect(syncResponse.statusCode).toBe(200);
     expect(mockState.githubCreateCount).toBe(1);
     expect(mockState.jiraCreateCount).toBe(1);
+    expect(mockState.linearCreateCount).toBe(1);
 
     const repeatSyncResponse = await app.inject({
       method: "POST",
@@ -444,7 +523,7 @@ describe("production integration workflow", () => {
       payload: {
         tenantId: "acme",
         dryRun: false,
-        targets: ["github", "jira"]
+        targets: ["github", "jira", "linear"]
       }
     });
     expect(repeatSyncResponse.statusCode).toBe(200);
@@ -452,6 +531,7 @@ describe("production integration workflow", () => {
     expect(mockState.jiraCreateCount).toBe(1);
     expect(mockState.githubUpdateCount).toBe(1);
     expect(mockState.jiraUpdateCount).toBe(1);
+    expect(mockState.linearUpdateCount).toBe(1);
 
     const packResponse = await app.inject({
       method: "GET",
@@ -461,9 +541,10 @@ describe("production integration workflow", () => {
     await app.close();
 
     expect(packResponse.statusCode).toBe(200);
-    expect(packResponse.json().issueLinks).toHaveLength(2);
+    expect(packResponse.json().issueLinks).toHaveLength(3);
     expect(mockState.githubIssues[0]?.body).not.toContain("context-token");
     expect(JSON.stringify(mockState.jiraIssues[0]?.fields.description)).toContain("repro-pack:jira:acme:zendesk-123");
+    expect(mockState.linearIssues[0]?.description).toContain("repro-pack:linear:acme:zendesk-123");
   });
 
   it("returns a clean failure when a tenant config is missing", async () => {

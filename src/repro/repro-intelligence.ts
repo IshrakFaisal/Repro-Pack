@@ -1,13 +1,17 @@
 import { createHash } from "node:crypto";
 import type {
+  AutomatedTestScaffold,
+  BlameAssigneeSuggestion,
   EnrichedContext,
   EnvironmentDelta,
+  FixValidationChecklistItem,
   NormalizedEvidenceBundle,
   RedactionAuditReport,
   RegressionClassification,
   ReproPath,
   ReproStep,
-  SanitizationReportItem
+  SanitizationReportItem,
+  SimilarBugHint
 } from "../types/schemas";
 
 function normalizeStepKey(step: ReproStep): string {
@@ -191,4 +195,142 @@ export function buildRedactionAuditReport(ticketId: string, report: Sanitization
     classifications,
     checksum
   };
+}
+
+function selectLikelyArea(normalized: NormalizedEvidenceBundle): string {
+  const networkPath = normalized.evidence
+    .find((item) => item.type === "network")
+    ?.detail.match(/(?:GET|POST|PUT|PATCH|DELETE)\s+([^\s]+)/i)?.[1];
+  if (networkPath) {
+    return networkPath.split("?")[0] ?? networkPath;
+  }
+
+  const logSource = normalized.logs.find((entry) => entry.source !== "not available")?.source;
+  if (logSource) {
+    return logSource;
+  }
+
+  return "affected workflow";
+}
+
+export function buildAutomatedTestScaffold(
+  normalized: NormalizedEvidenceBundle,
+  reproSteps: ReproStep[]
+): AutomatedTestScaffold {
+  const area = selectLikelyArea(normalized);
+  const assertions = [
+    normalized.actualBehavior !== "not available"
+      ? `Assert the failing behavior is no longer observed: ${normalized.actualBehavior}`
+      : "Assert the reported failure no longer occurs.",
+    normalized.expectedBehavior !== "not available"
+      ? `Assert the expected behavior is restored: ${normalized.expectedBehavior}`
+      : "Assert the workflow completes successfully."
+  ];
+  const skeleton = [
+    `describe("${area} repro", () => {`,
+    "  it(\"reproduces the support ticket path\", async () => {",
+    ...reproSteps.slice(0, 5).map((step) => `    // ${step.step}`),
+    "    // TODO: fill in app-specific setup and assertions.",
+    "  });",
+    "});"
+  ];
+
+  return {
+    framework: "Vitest or Playwright",
+    language: "TypeScript",
+    fileHint: `${area.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "repro"}.spec.ts`,
+    skeleton,
+    assertions
+  };
+}
+
+export function buildSimilarBugHints(
+  context: EnrichedContext,
+  normalized: NormalizedEvidenceBundle,
+  regressionClassification: RegressionClassification
+): SimilarBugHint[] {
+  const hints: SimilarBugHint[] = [];
+  const errorCodes = [...new Set(normalized.logs.map((entry) => entry.errorCode).filter((entry): entry is string => Boolean(entry)))];
+  for (const errorCode of errorCodes.slice(0, 3)) {
+    hints.push({
+      signal: `error_code:${errorCode}`,
+      rationale: "Search existing issues for the same provider error code before opening a duplicate.",
+      confidence: 0.78
+    });
+  }
+
+  const traceIds = [...new Set(normalized.logs.map((entry) => entry.traceId).filter((entry): entry is string => Boolean(entry)))];
+  if (traceIds.length > 0) {
+    hints.push({
+      signal: `trace_family:${traceIds[0]}`,
+      rationale: "Trace correlation is present, so related failures may already be grouped by trace or request family.",
+      confidence: 0.64
+    });
+  }
+
+  if (regressionClassification.classification === "likely_regression") {
+    hints.push({
+      signal: `release:${context.release.data?.releaseIdentifier ?? context.release.data?.buildHash ?? "recent-release"}`,
+      rationale: "Regression signals were detected, so recent release-linked issues are likely duplicates or related incidents.",
+      confidence: 0.72
+    });
+  }
+
+  return hints.slice(0, 5);
+}
+
+export function suggestBlameAssignee(normalized: NormalizedEvidenceBundle): BlameAssigneeSuggestion {
+  const area = selectLikelyArea(normalized);
+  const source = normalized.logs.find((entry) => entry.source !== "not available")?.source;
+  const route = normalized.timeline.find((event) => event.relatedIds.length > 0)?.relatedIds[0];
+  const candidate = source ?? route ?? area;
+  const normalizedCandidate = candidate.replace(/^\/+/, "").split(/[/?#]/)[0] ?? candidate;
+
+  return {
+    assignee: normalizedCandidate === "affected workflow" ? "not available" : `${normalizedCandidate}-owner`,
+    rationale:
+      normalizedCandidate === "affected workflow"
+        ? "No route, service, or trace ownership signal was available."
+        : "Suggested from the strongest route/service signal in the sanitized repro evidence. Confirm with git blame or CODEOWNERS.",
+    files:
+      normalizedCandidate === "affected workflow"
+        ? []
+        : [`src/${normalizedCandidate.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`],
+    confidence: normalizedCandidate === "affected workflow" ? 0 : 0.48
+  };
+}
+
+export function buildFixValidationChecklist(
+  reproSteps: ReproStep[],
+  normalized: NormalizedEvidenceBundle,
+  regressionClassification: RegressionClassification,
+  sanitizationReport: SanitizationReportItem[]
+): FixValidationChecklistItem[] {
+  const items: FixValidationChecklistItem[] = reproSteps.slice(0, 4).map((step) => ({
+    item: `Re-run: ${step.step}`,
+    source: "repro_step"
+  }));
+
+  if (normalized.logs.some((entry) => entry.level.toLowerCase() === "error")) {
+    items.push({
+      item: "Confirm the captured error log no longer appears for the same workflow.",
+      source: "evidence"
+    });
+  }
+
+  if (regressionClassification.classification === "likely_regression") {
+    items.push({
+      item: "Validate the fix against the release or flag state that triggered the regression signal.",
+      source: "regression"
+    });
+  }
+
+  if (sanitizationReport.length > 0) {
+    items.push({
+      item: "Re-export the repro pack and verify sensitive fields remain redacted.",
+      source: "sanitization"
+    });
+  }
+
+  return items.slice(0, 8);
 }

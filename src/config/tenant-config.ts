@@ -4,8 +4,12 @@ import type { SecretManager } from "../secrets/manager";
 import {
   ResolvedGitHubIssueProviderConfigSchema,
   ResolvedGenericHttpContextProviderConfigSchema,
+  ResolvedDatadogProviderConfigSchema,
+  ResolvedIntercomProviderConfigSchema,
   ResolvedJiraIssueProviderConfigSchema,
+  ResolvedLinearIssueProviderConfigSchema,
   ResolvedLlmConfigSchema,
+  ResolvedSentryProviderConfigSchema,
   ResolvedSlackConfigSchema,
   ResolvedTenantConfigSchema,
   ResolvedWebhookConfigSchema,
@@ -73,6 +77,25 @@ export class TenantConfigStore {
               bearerToken: await this.secretManager.resolve(raw.providers.support.bearerToken)
             })
           : undefined,
+        intercom: raw.providers.intercom
+          ? ResolvedIntercomProviderConfigSchema.parse({
+              ...raw.providers.intercom,
+              token: await this.secretManager.resolve(raw.providers.intercom.token)
+            })
+          : undefined,
+        sentry: raw.providers.sentry
+          ? ResolvedSentryProviderConfigSchema.parse({
+              ...raw.providers.sentry,
+              token: await this.secretManager.resolve(raw.providers.sentry.token)
+            })
+          : undefined,
+        datadog: raw.providers.datadog
+          ? ResolvedDatadogProviderConfigSchema.parse({
+              ...raw.providers.datadog,
+              apiKey: await this.secretManager.resolve(raw.providers.datadog.apiKey),
+              applicationKey: await this.secretManager.resolve(raw.providers.datadog.applicationKey)
+            })
+          : undefined,
         logs: raw.providers.logs
           ? ResolvedGenericHttpContextProviderConfigSchema.parse({
               ...raw.providers.logs,
@@ -109,6 +132,12 @@ export class TenantConfigStore {
               email: await this.secretManager.resolve(raw.providers.jira.email),
               apiToken: await this.secretManager.resolve(raw.providers.jira.apiToken),
               bearerToken: await this.secretManager.resolve(raw.providers.jira.bearerToken)
+            })
+          : undefined,
+        linear: raw.providers.linear
+          ? ResolvedLinearIssueProviderConfigSchema.parse({
+              ...raw.providers.linear,
+              token: await this.secretManager.resolve(raw.providers.linear.token)
             })
           : undefined,
         slack: raw.providers.slack

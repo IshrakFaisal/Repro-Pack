@@ -78,6 +78,55 @@ function formatLlmSuggestions(reproPack: ReproPack): string {
   ].join("\n");
 }
 
+function formatTestScaffold(reproPack: ReproPack): string {
+  const scaffold = reproPack.automatedTestScaffold;
+  if (scaffold.skeleton.length === 0 && scaffold.assertions.length === 0) {
+    return "- not available";
+  }
+
+  return [
+    `- Framework: ${scaffold.framework}`,
+    `- Language: ${scaffold.language}`,
+    `- File hint: \`${scaffold.fileHint}\``,
+    "",
+    "```ts",
+    ...scaffold.skeleton,
+    "```",
+    "",
+    ...scaffold.assertions.map((assertion) => `- ${assertion}`)
+  ].join("\n");
+}
+
+function formatSimilarBugHints(reproPack: ReproPack): string {
+  if (reproPack.similarBugHints.length === 0) {
+    return "- not available";
+  }
+
+  return reproPack.similarBugHints
+    .map((hint) => `- ${hint.signal} (confidence=${hint.confidence}): ${hint.rationale}`)
+    .join("\n");
+}
+
+function formatBlameAssignee(reproPack: ReproPack): string {
+  const suggestion = reproPack.blameAssigneeSuggestion;
+  return [
+    `- Suggested assignee: ${suggestion.assignee}`,
+    `- Confidence: ${suggestion.confidence}`,
+    `- Rationale: ${suggestion.rationale}`,
+    `- File hints: ${suggestion.files.length > 0 ? suggestion.files.map((file) => `\`${file}\``).join(", ") : "not available"}`
+  ].join("\n");
+}
+
+function formatFixValidationChecklist(reproPack: ReproPack): string {
+  if (reproPack.fixValidationChecklist.length === 0) {
+    return "- not available";
+  }
+
+  return reproPack.fixValidationChecklist
+    .map((item) => `- [ ] ${item.item} (${item.source})`)
+    .join("\n");
+}
+
 function formatTimeline(timeline: ReproPack["timeline"]): string {
   if (timeline.length === 0) {
     return "- not available";
@@ -147,6 +196,18 @@ ${formatAlternativePaths(reproPack)}
 
 ## AI-suggested step overlay
 ${formatLlmSuggestions(reproPack)}
+
+## Automated test scaffold
+${formatTestScaffold(reproPack)}
+
+## Similar bug dedupe hints
+${formatSimilarBugHints(reproPack)}
+
+## Blame-based assignee suggestion
+${formatBlameAssignee(reproPack)}
+
+## Fix validation checklist
+${formatFixValidationChecklist(reproPack)}
 
 ## Expected vs actual
 - Expected: ${reproPack.expectedBehavior}

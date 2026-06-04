@@ -29,6 +29,7 @@ Watch for:
 - queue jobs stuck in `running`
 - failed or `dead_lettered` jobs that repeatedly fail after explicit retry
 - repeated provider retry/failure patterns
+- Sentry/Datadog provider auth, timeout, or rate-limit failures
 - auth failures
 - config errors for missing tenant files or unresolved secrets
 - issue sync create/update spikes
@@ -38,7 +39,7 @@ Useful metrics:
 - `repro_processing_duration_ms` for end-to-end ticket processing duration by tenant and outcome
 - `repro_provider_fetch_total`, `repro_provider_fetch_latency_ms`, and `repro_provider_failures_total` for context-provider health
 - `repro_queue_jobs_total`, `repro_queue_job_duration_ms`, and `repro_queue_job_retries_total` for async queue throughput and retry activity
-- `repro_issue_sync_total` for GitHub/Jira preview, create, update, missing-config, and failure outcomes
+- `repro_issue_sync_total` for GitHub/Jira/Linear preview, create, update, missing-config, and failure outcomes
 
 Queue operations:
 
@@ -73,6 +74,15 @@ Add the provider implementation in [src/secrets/manager.ts](C:\Users\USER\OneDri
 - Set `REQUIRE_CUSTOMER_CONSENT=true` globally or `requireCustomerConsent: true` per tenant to block repro pack creation until requests include `customerConsentConfirmed`.
 - Each generated repro pack includes a redaction audit report with redaction counts, classifications, and a checksum.
 - Review `sanitizationReport` and `redactionAuditReport` before approving external issue sync for regulated tenants.
+- Review `automatedTestScaffold`, `similarBugHints`, `blameAssigneeSuggestion`, and `fixValidationChecklist` as generated engineering guidance. They are derived from sanitized evidence and should be confirmed by the owning engineering team.
+
+## Provider notes
+
+- Configure either `providers.support` for Zendesk or `providers.intercom` for Intercom ticket ingestion. If both are present, Intercom is selected first.
+- Configure one log source per tenant path: `providers.sentry` is preferred over `providers.datadog`, and `providers.datadog` is preferred over generic `providers.logs`.
+- Configure `providers.linear` to enable `linear` as a sync/export target alongside GitHub and Jira.
+- Slack incoming webhooks post pending review requests with Approve/Edit/Discard action values and approval summaries. Handling interactive callbacks requires a Slack app endpoint outside this service.
+- `BASE_URL` should be set when Slack review messages need direct links back to pack details.
 
 ## Retention and cleanup
 

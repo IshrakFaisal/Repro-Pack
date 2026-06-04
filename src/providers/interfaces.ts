@@ -60,6 +60,14 @@ export interface IssueTrackerProvider {
 
 export interface NotificationProvider {
   name: string;
+  postReviewRequest?(input: {
+    tenantId: string;
+    tenantName: string;
+    ticketId: string;
+    summary: string;
+    confidence: number;
+    packUrl?: string;
+  }): Promise<void>;
   postPackApproved(input: {
     tenantId: string;
     tenantName: string;

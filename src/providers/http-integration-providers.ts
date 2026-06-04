@@ -279,6 +279,66 @@ export class ZendeskSupportProvider implements SupportProvider {
   }
 }
 
+export class IntercomSupportProvider implements SupportProvider {
+  name = "intercom-support";
+
+  constructor(
+    private readonly tenant: ResolvedTenantConfig,
+    private readonly client: HttpJsonClient
+  ) {}
+
+  async loadTicket(lookup: TicketLookup): Promise<SupportTicket> {
+    if (!("supportTicketId" in lookup)) {
+      throw new Error("Intercom support provider requires supportTicketId lookup");
+    }
+
+    const config = this.tenant.providers.intercom;
+    if (!config) {
+      throw new Error(`Intercom provider not configured for tenant ${this.tenant.tenantId}`);
+    }
+
+    const headers = {
+      authorization: `Bearer ${config.token}`,
+      accept: "application/json"
+    };
+    const response = await this.client.request<Record<string, unknown>>(
+      `${config.baseUrl.replace(/\/$/, "")}/tickets/${lookup.supportTicketId}`,
+      { headers }
+    );
+    const raw = response.data;
+    const contacts = Array.isArray(raw.contacts) ? raw.contacts : [];
+    const firstContact = contacts.find((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null);
+
+    return normalizeSupportTicket({
+      ticketId: `intercom-${lookup.supportTicketId}`,
+      complaintText: String(raw.description ?? raw.body ?? raw.title ?? "not available"),
+      status: raw.state?.toString() ?? raw.status?.toString(),
+      priority: raw.priority?.toString(),
+      timestamps: {
+        createdAt: raw.created_at ? new Date(Number(raw.created_at) * 1000).toISOString() : undefined,
+        updatedAt: raw.updated_at ? new Date(Number(raw.updated_at) * 1000).toISOString() : undefined
+      },
+      tags: Array.isArray(raw.tags) ? raw.tags.map((entry) => String(entry)) : [],
+      requester: firstContact
+        ? {
+            id: firstContact.id?.toString(),
+            name: firstContact.name?.toString(),
+            email: firstContact.email?.toString()
+          }
+        : undefined,
+      customFields:
+        typeof raw.custom_attributes === "object" && raw.custom_attributes !== null
+          ? (raw.custom_attributes as Record<string, unknown>)
+          : {},
+      source: {
+        platform: "intercom",
+        externalId: lookup.supportTicketId
+      },
+      rawSource: raw
+    });
+  }
+}
+
 abstract class BaseHttpContextProvider<T> {
   constructor(
     readonly name: string,
@@ -329,6 +389,98 @@ export class HttpLogsProvider extends BaseHttpContextProvider<LogsContext> imple
 
   protected parse(raw: unknown): LogsContext {
     return LogsContextSchema.parse(raw);
+  }
+}
+
+export class SentryLogsProvider implements LogsProvider {
+  name = "sentry-logs";
+
+  constructor(
+    private readonly tenant: ResolvedTenantConfig,
+    private readonly client: HttpJsonClient
+  ) {}
+
+  async fetch(ticket: SupportTicket): Promise<ProviderResultOf<LogsContext>> {
+    return withProviderResult(this.name, async () => {
+      const config = this.tenant.providers.sentry;
+      if (!config) {
+        throw new Error(`Sentry provider not configured for tenant ${this.tenant.tenantId}`);
+      }
+
+      const url = new URL(
+        `/api/0/projects/${config.organizationSlug}/${config.projectSlug}/events/`,
+        config.baseUrl.endsWith("/") ? config.baseUrl : `${config.baseUrl}/`
+      );
+      url.searchParams.set("query", [ticket.ticketId, ticket.userId, ticket.accountId].filter(Boolean).join(" "));
+      const response = await this.client.request<Array<Record<string, unknown>>>(url.toString(), {
+        headers: { authorization: `Bearer ${config.token}` }
+      });
+      const entries = response.data.map((event) => ({
+        timestamp: String(event.dateCreated ?? event.timestamp ?? nowIso()),
+        level: String(event.level ?? "error"),
+        source: "sentry",
+        message: String(event.title ?? event.message ?? event.eventID ?? "Sentry event"),
+        requestId: event.eventID?.toString(),
+        traceId:
+          typeof event.contexts === "object" && event.contexts !== null
+            ? ((event.contexts as { trace?: { trace_id?: string } }).trace?.trace_id)
+            : undefined,
+        errorCode: event.culprit?.toString(),
+        metadata: event
+      }));
+      return LogsContextSchema.parse({ entries, recentErrors: entries.filter((entry) => entry.level === "error") });
+    });
+  }
+}
+
+export class DatadogLogsProvider implements LogsProvider {
+  name = "datadog-logs";
+
+  constructor(
+    private readonly tenant: ResolvedTenantConfig,
+    private readonly client: HttpJsonClient
+  ) {}
+
+  async fetch(ticket: SupportTicket): Promise<ProviderResultOf<LogsContext>> {
+    return withProviderResult(this.name, async () => {
+      const config = this.tenant.providers.datadog;
+      if (!config) {
+        throw new Error(`Datadog provider not configured for tenant ${this.tenant.tenantId}`);
+      }
+
+      const response = await this.client.request<{ data?: Array<{ id?: string; attributes?: Record<string, unknown> }> }>(
+        `${config.baseUrl.replace(/\/$/, "")}/api/v2/logs/events/search`,
+        {
+          method: "POST",
+          headers: {
+            "dd-api-key": config.apiKey,
+            "dd-application-key": config.applicationKey
+          },
+          body: {
+            filter: {
+              query: [ticket.ticketId, ticket.userId, ticket.accountId].filter(Boolean).join(" OR "),
+              from: "now-30d",
+              to: "now"
+            },
+            page: { limit: 25 }
+          }
+        }
+      );
+      const entries = (response.data.data ?? []).map((event) => {
+        const attrs = event.attributes ?? {};
+        return {
+          timestamp: String(attrs.timestamp ?? nowIso()),
+          level: String(attrs.status ?? attrs.level ?? "error"),
+          source: String(attrs.service ?? "datadog"),
+          message: String(attrs.message ?? event.id ?? "Datadog event"),
+          requestId: attrs.request_id?.toString(),
+          traceId: attrs.trace_id?.toString(),
+          errorCode: attrs.error_code?.toString(),
+          metadata: attrs
+        };
+      });
+      return LogsContextSchema.parse({ entries, recentErrors: entries.filter((entry) => entry.level === "error") });
+    });
   }
 }
 
@@ -684,6 +836,160 @@ export class JiraIssueTracker implements IssueTrackerProvider {
       externalId: created.data.id,
       externalKey,
       url: created.data.self,
+      status: "created",
+      syncedAt: nowIso(),
+      idempotencyKey
+    };
+  }
+}
+
+type LinearGraphQlResponse<T> = {
+  data?: T;
+  errors?: Array<{ message?: string }>;
+};
+
+export class LinearIssueTracker implements IssueTrackerProvider {
+  readonly name = "linear-issues";
+  readonly target = "linear" as const;
+
+  constructor(
+    private readonly tenant: ResolvedTenantConfig,
+    private readonly client: HttpJsonClient
+  ) {}
+
+  private headers(): Record<string, string> {
+    const config = this.tenant.providers.linear;
+    if (!config) {
+      throw new Error(`Linear provider not configured for tenant ${this.tenant.tenantId}`);
+    }
+
+    return {
+      authorization: config.token
+    };
+  }
+
+  private async graphQl<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+    const config = this.tenant.providers.linear;
+    if (!config) {
+      throw new Error(`Linear provider not configured for tenant ${this.tenant.tenantId}`);
+    }
+
+    const response = await this.client.request<LinearGraphQlResponse<T>>(config.baseUrl, {
+      method: "POST",
+      headers: this.headers(),
+      body: { query, variables }
+    });
+
+    if (response.data.errors?.length) {
+      throw new Error(response.data.errors.map((error) => error.message ?? "Linear GraphQL error").join("; "));
+    }
+
+    if (!response.data.data) {
+      throw new Error("Linear GraphQL response did not include data");
+    }
+
+    return response.data.data;
+  }
+
+  async sync(input: {
+    tenantId: string;
+    ticket: SupportTicket;
+    issueDraft: IssueDraft;
+    existingLink?: IssueLink;
+    dryRun: boolean;
+  }): Promise<IssueLink> {
+    const config = this.tenant.providers.linear;
+    if (!config) {
+      throw new Error(`Linear provider not configured for tenant ${this.tenant.tenantId}`);
+    }
+
+    const marker = buildMarker(this.target, input.tenantId, input.ticket.ticketId);
+    const externalKey = `${config.teamId}:${marker}`;
+    const idempotencyKey = `linear:${input.tenantId}:${input.ticket.ticketId}`;
+    const description = buildIssueBody(input.issueDraft, marker);
+
+    if (input.dryRun) {
+      return {
+        target: this.target,
+        externalId: input.existingLink?.externalId ?? "preview",
+        externalKey,
+        status: "preview",
+        syncedAt: nowIso(),
+        idempotencyKey
+      };
+    }
+
+    const existing =
+      input.existingLink ??
+      (
+        await this.graphQl<{
+          issues: { nodes: Array<{ id: string; identifier?: string; url?: string }> };
+        }>(
+          `query ExistingReproIssue($marker: String!) {
+            issues(first: 10, filter: { description: { contains: $marker } }) {
+              nodes { id identifier url }
+            }
+          }`,
+          { marker }
+        )
+      ).issues.nodes[0];
+
+    if (existing) {
+      const existingId = "externalId" in existing ? existing.externalId : existing.id;
+      const updated = await this.graphQl<{
+        issueUpdate: { success: boolean; issue: { id: string; identifier?: string; url?: string } };
+      }>(
+        `mutation UpdateReproIssue($id: String!, $input: IssueUpdateInput!) {
+          issueUpdate(id: $id, input: $input) {
+            success
+            issue { id identifier url }
+          }
+        }`,
+        {
+          id: existingId,
+          input: {
+            title: input.issueDraft.title,
+            description,
+            assigneeId: config.defaultAssigneeId
+          }
+        }
+      );
+
+      return {
+        target: this.target,
+        externalId: updated.issueUpdate.issue.id,
+        externalKey,
+        url: updated.issueUpdate.issue.url,
+        status: "updated",
+        syncedAt: nowIso(),
+        idempotencyKey
+      };
+    }
+
+    const created = await this.graphQl<{
+      issueCreate: { success: boolean; issue: { id: string; identifier?: string; url?: string } };
+    }>(
+      `mutation CreateReproIssue($input: IssueCreateInput!) {
+        issueCreate(input: $input) {
+          success
+          issue { id identifier url }
+        }
+      }`,
+      {
+        input: {
+          teamId: config.teamId,
+          title: input.issueDraft.title,
+          description,
+          assigneeId: config.defaultAssigneeId
+        }
+      }
+    );
+
+    return {
+      target: this.target,
+      externalId: created.issueCreate.issue.id,
+      externalKey,
+      url: created.issueCreate.issue.url,
       status: "created",
       syncedAt: nowIso(),
       idempotencyKey

@@ -69,7 +69,7 @@ const ReviewRequestSchema = z.object({
 const IssueSyncRequestSchema = z.object({
   tenantId: z.string().optional(),
   dryRun: z.boolean().default(true),
-  targets: z.array(z.enum(["github", "jira"])).default(["github", "jira"])
+  targets: z.array(z.enum(["github", "jira", "linear"])).default(["github", "jira"])
 });
 
 function tenantIdFromRequest(request: { headers: Record<string, unknown>; body?: unknown; query?: unknown }): string | undefined {
@@ -285,6 +285,14 @@ export async function createApp() {
       event: "pack.processed",
       status: "processed"
     });
+    void providerSet.notifications.slack?.postReviewRequest?.({
+      tenantId,
+      tenantName: providerSet.tenant?.name ?? tenantId,
+      ticketId: storedPack.ticketId,
+      summary: storedPack.reproPack.summary,
+      confidence: storedPack.reproPack.confidence.overall,
+      packUrl: buildPackUrl(config.baseUrl, tenantId, storedPack.ticketId)
+    });
 
     reply.send({
       tenantId,
@@ -459,7 +467,7 @@ export async function createApp() {
   app.post("/issues/:ticketId/export", async (request, reply) => {
     const actor = ensureRole((request as FastifyRequestWithActor).authActor, "read");
     const params = z.object({ ticketId: z.string() }).parse(request.params);
-    const body = z.object({ tenantId: z.string().optional(), target: z.enum(["github", "jira"]).optional() }).parse(request.body ?? {});
+    const body = z.object({ tenantId: z.string().optional(), target: z.enum(["github", "jira", "linear"]).optional() }).parse(request.body ?? {});
     const tenantId = resolveTenantScope(actor, body.tenantId);
     const issuePath = await store.exportIssueDraft(params.ticketId, tenantId, body.target ?? "github");
     reply.send({

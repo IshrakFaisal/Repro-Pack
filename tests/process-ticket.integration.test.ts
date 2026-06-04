@@ -61,7 +61,15 @@ describe("process ticket integration", () => {
       dataResidencyMode: "standard",
       customerConsentRequired: false
     });
+    expect(result.reproPack.automatedTestScaffold.skeleton.join("\n")).toContain("describe(");
+    expect(result.reproPack.similarBugHints.length).toBeGreaterThan(0);
+    expect(result.reproPack.blameAssigneeSuggestion.rationale).toContain("Suggested");
+    expect(result.reproPack.fixValidationChecklist.length).toBeGreaterThan(0);
     expect(result.issueDraft.body).toContain("## Redaction audit report");
+    expect(result.issueDraft.body).toContain("## Automated test scaffold");
+    expect(result.issueDraft.body).toContain("## Similar bug dedupe hints");
+    expect(result.issueDraft.body).toContain("## Blame-based assignee suggestion");
+    expect(result.issueDraft.body).toContain("## Fix validation checklist");
     expect(result.issueDraft.body).not.toContain("jane.customer@example.test");
     expect(result.issueDraft.body).toContain("[REDACTED:EMAIL]");
   });

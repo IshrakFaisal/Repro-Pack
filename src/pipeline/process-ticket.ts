@@ -7,10 +7,14 @@ import { sanitizePayload } from "../sanitizer/sanitizer";
 import { generateReproSteps } from "../repro/repro-step-generator";
 import {
   buildAlternativeReproPaths,
+  buildAutomatedTestScaffold,
+  buildFixValidationChecklist,
   buildMinimalReproSequence,
   buildRedactionAuditReport,
+  buildSimilarBugHints,
   classifyRegression,
-  detectEnvironmentDeltas
+  detectEnvironmentDeltas,
+  suggestBlameAssignee
 } from "../repro/repro-intelligence";
 import { scoreConfidence } from "../scoring/confidence-scorer";
 import { assembleArtifacts } from "../assembly/issue-assembler";
@@ -128,13 +132,32 @@ export async function processTicket(
     const confidence = ConfidenceScoreSchema.parse(
       scoreConfidence({ context, normalized, reproSteps, sanitizedPayload })
     );
+    const summary = sanitizeText(selectSummary(normalized.evidence, ticket.complaintText));
+    const customerImpact = sanitizeText(normalized.customerImpact);
+    const expectedBehavior = sanitizeText(normalized.expectedBehavior);
+    const actualBehavior = sanitizeText(normalized.actualBehavior);
+    const normalizedEngineering = {
+      ...normalized,
+      customerImpact,
+      expectedBehavior,
+      actualBehavior
+    };
+    const fullSanitizationReport = [...sanitizedPayload.report, ...textSanitizationReport];
+    const automatedTestScaffold = buildAutomatedTestScaffold(normalizedEngineering, reproSteps);
+    const similarBugHints = buildSimilarBugHints(context, normalized, regressionClassification);
+    const blameAssigneeSuggestion = suggestBlameAssignee(normalized);
+    const fixValidationChecklist = buildFixValidationChecklist(
+      reproSteps,
+      normalized,
+      regressionClassification,
+      fullSanitizationReport
+    );
     logger.info({
       event: "confidence.scored",
       ticketId: ticket.ticketId,
       overall: confidence.overall
     });
 
-    const summary = sanitizeText(selectSummary(normalized.evidence, ticket.complaintText));
     const dataResidencyMode = providers.tenant?.dataResidencyMode ?? providers.config.dataResidencyMode;
     const llmSuggestions = await suggestLlmReproSteps({
       tenant: providers.tenant,
@@ -147,29 +170,33 @@ export async function processTicket(
     const reproPack = ReproPackSchema.parse({
       ticketId: ticket.ticketId,
       summary,
-      customerImpact: sanitizeText(normalized.customerImpact),
+      customerImpact,
       reproSteps,
-      expectedBehavior: sanitizeText(normalized.expectedBehavior),
-      actualBehavior: sanitizeText(normalized.actualBehavior),
+      expectedBehavior,
+      actualBehavior,
       environment: normalized.environment,
       featureFlags: normalized.featureFlags,
       timeline: normalized.timeline,
       logs: normalized.logs,
       samplePayload: sanitizedPayload.payload,
-      sanitizationReport: [...sanitizedPayload.report, ...textSanitizationReport],
+      sanitizationReport: fullSanitizationReport,
       evidence: normalized.evidence,
       confidence,
       minimalReproSequence,
       alternativeReproPaths,
       environmentDeltas,
       regressionClassification,
-      redactionAuditReport: buildRedactionAuditReport(ticket.ticketId, [...sanitizedPayload.report, ...textSanitizationReport]),
+      redactionAuditReport: buildRedactionAuditReport(ticket.ticketId, fullSanitizationReport),
       compliance: {
         dataResidencyMode,
         llmUsed: Boolean(llmSuggestions),
         customerConsentRequired: consentRequired,
         customerConsentConfirmed: Boolean(input.customerConsentConfirmed)
       },
+      automatedTestScaffold,
+      similarBugHints,
+      blameAssigneeSuggestion,
+      fixValidationChecklist,
       llmSuggestions
     });
 

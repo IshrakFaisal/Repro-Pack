@@ -68,6 +68,28 @@ export const ZendeskProviderConfigSchema = z.object({
   bearerToken: SecretRefSchema.optional()
 });
 
+export const IntercomProviderConfigSchema = z.object({
+  type: z.literal("intercom"),
+  baseUrl: z.string().url().default("https://api.intercom.io"),
+  token: SecretRefSchema
+});
+
+export const SentryProviderConfigSchema = z.object({
+  type: z.literal("sentry"),
+  baseUrl: z.string().url().default("https://sentry.io"),
+  organizationSlug: z.string().min(1),
+  projectSlug: z.string().min(1),
+  token: SecretRefSchema
+});
+
+export const DatadogProviderConfigSchema = z.object({
+  type: z.literal("datadog"),
+  baseUrl: z.string().url().default("https://api.datadoghq.com"),
+  apiKey: SecretRefSchema,
+  applicationKey: SecretRefSchema,
+  site: z.string().optional()
+});
+
 export const GenericHttpContextProviderConfigSchema = z.object({
   type: z.enum(["http-logs", "http-session", "http-flags", "http-release"]),
   baseUrl: z.string().url(),
@@ -100,6 +122,15 @@ export const JiraIssueProviderConfigSchema = z.object({
   customFields: z.record(z.unknown()).default({})
 });
 
+export const LinearIssueProviderConfigSchema = z.object({
+  type: z.literal("linear"),
+  baseUrl: z.string().url().default("https://api.linear.app/graphql"),
+  token: SecretRefSchema,
+  teamId: z.string().min(1),
+  labels: z.array(z.string()).default(["support", "bug", "repro-pack"]),
+  defaultAssigneeId: z.string().optional()
+});
+
 export const LlmConfigSchema = z.object({
   enabled: z.boolean().default(false),
   model: z.string().min(1).default("claude-sonnet-4-20250514"),
@@ -123,12 +154,16 @@ export const WebhookConfigSchema = z.object({
 
 export const TenantProviderConfigSchema = z.object({
   support: ZendeskProviderConfigSchema.optional(),
+  intercom: IntercomProviderConfigSchema.optional(),
+  sentry: SentryProviderConfigSchema.optional(),
+  datadog: DatadogProviderConfigSchema.optional(),
   logs: GenericHttpContextProviderConfigSchema.optional(),
   session: GenericHttpContextProviderConfigSchema.optional(),
   featureFlags: GenericHttpContextProviderConfigSchema.optional(),
   release: GenericHttpContextProviderConfigSchema.optional(),
   github: GitHubIssueProviderConfigSchema.optional(),
   jira: JiraIssueProviderConfigSchema.optional(),
+  linear: LinearIssueProviderConfigSchema.optional(),
   slack: SlackConfigSchema.optional(),
   webhook: WebhookConfigSchema.optional()
 });
@@ -151,6 +186,28 @@ export const ResolvedZendeskProviderConfigSchema = z.object({
   email: z.string().optional(),
   apiToken: z.string().optional(),
   bearerToken: z.string().optional()
+});
+
+export const ResolvedIntercomProviderConfigSchema = z.object({
+  type: z.literal("intercom"),
+  baseUrl: z.string().url(),
+  token: z.string()
+});
+
+export const ResolvedSentryProviderConfigSchema = z.object({
+  type: z.literal("sentry"),
+  baseUrl: z.string().url(),
+  organizationSlug: z.string(),
+  projectSlug: z.string(),
+  token: z.string()
+});
+
+export const ResolvedDatadogProviderConfigSchema = z.object({
+  type: z.literal("datadog"),
+  baseUrl: z.string().url(),
+  apiKey: z.string(),
+  applicationKey: z.string(),
+  site: z.string().optional()
 });
 
 export const ResolvedGenericHttpContextProviderConfigSchema = z.object({
@@ -185,6 +242,15 @@ export const ResolvedJiraIssueProviderConfigSchema = z.object({
   customFields: z.record(z.unknown()).default({})
 });
 
+export const ResolvedLinearIssueProviderConfigSchema = z.object({
+  type: z.literal("linear"),
+  baseUrl: z.string().url(),
+  token: z.string(),
+  teamId: z.string(),
+  labels: z.array(z.string()).default(["support", "bug", "repro-pack"]),
+  defaultAssigneeId: z.string().optional()
+});
+
 export const ResolvedLlmConfigSchema = z.object({
   enabled: z.boolean().default(false),
   model: z.string(),
@@ -206,12 +272,16 @@ export const ResolvedWebhookConfigSchema = z.object({
 
 export const ResolvedTenantProviderConfigSchema = z.object({
   support: ResolvedZendeskProviderConfigSchema.optional(),
+  intercom: ResolvedIntercomProviderConfigSchema.optional(),
+  sentry: ResolvedSentryProviderConfigSchema.optional(),
+  datadog: ResolvedDatadogProviderConfigSchema.optional(),
   logs: ResolvedGenericHttpContextProviderConfigSchema.optional(),
   session: ResolvedGenericHttpContextProviderConfigSchema.optional(),
   featureFlags: ResolvedGenericHttpContextProviderConfigSchema.optional(),
   release: ResolvedGenericHttpContextProviderConfigSchema.optional(),
   github: ResolvedGitHubIssueProviderConfigSchema.optional(),
   jira: ResolvedJiraIssueProviderConfigSchema.optional(),
+  linear: ResolvedLinearIssueProviderConfigSchema.optional(),
   slack: ResolvedSlackConfigSchema.optional(),
   webhook: ResolvedWebhookConfigSchema.optional()
 });
@@ -228,7 +298,7 @@ export const ResolvedTenantConfigSchema = z.object({
   providers: ResolvedTenantProviderConfigSchema
 });
 
-export const IssueTargetSchema = z.enum(["github", "jira"]);
+export const IssueTargetSchema = z.enum(["github", "jira", "linear"]);
 
 export const IssueLinkSchema = z.object({
   target: IssueTargetSchema,

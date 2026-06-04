@@ -1,15 +1,16 @@
 # Support Ticket -> Repro Pack
 
-Production-ready TypeScript service for turning support tickets into developer-ready repro packs with sanitized evidence, reproducible context, review workflow, and idempotent GitHub/Jira sync.
+Production-ready TypeScript service for turning support tickets into developer-ready repro packs with sanitized evidence, reproducible context, review workflow, and idempotent GitHub/Jira/Linear sync.
 
 ## What changed
 
 This repo now supports:
 
 - fixture and direct-input local development
-- real Zendesk ingestion
-- real GitHub and Jira sync adapters
-- generic HTTP adapters for logs, session replay, feature flags, and release metadata
+- real Zendesk and Intercom ingestion
+- real GitHub, Jira, and Linear sync adapters
+- native Sentry/Datadog log ingestion plus generic HTTP adapters for logs, session replay, feature flags, and release metadata
+- Slack review-request and approval notifications
 - tenant-aware auth and access control
 - durable async job processing with restart recovery
 - pluggable persistence with filesystem and SQLite backends
@@ -99,12 +100,17 @@ Tenant config can define:
 - `requireCustomerConsent`
 - `llm`
 - `providers.support`
+- `providers.intercom`
+- `providers.sentry`
+- `providers.datadog`
 - `providers.logs`
 - `providers.session`
 - `providers.featureFlags`
 - `providers.release`
 - `providers.github`
 - `providers.jira`
+- `providers.linear`
+- `providers.slack`
 
 Example secret ref:
 
@@ -194,7 +200,7 @@ corepack pnpm cli -- sync-issues --tenant acme --ticket zendesk-12345
 Write sync:
 
 ```bash
-corepack pnpm cli -- sync-issues --tenant acme --ticket zendesk-12345 --write
+corepack pnpm cli -- sync-issues --tenant acme --ticket zendesk-12345 --target github --target jira --target linear --write
 ```
 
 ## Production deployment
@@ -215,13 +221,15 @@ Operational details are in [docs/production-runbook.md](C:\Users\USER\OneDrive\D
 - External issue sync only uses sanitized issue drafts.
 - GitHub sync re-discovers issues by stored link, marker search, and fallback list scan.
 - Jira sync re-discovers issues by stored link and marker search.
+- Linear sync re-discovers issues by stored link or repro-pack marker search before create/update.
 - Dry-run remains the default safe review flow.
 - Audit events are recorded for processing, review, sync, auth failures, and request/config errors.
 - Failed async jobs can be retried explicitly; non-failed jobs are not moved back to the queue.
 - Repeatedly failing async jobs are dead-lettered after `QUEUE_MAX_ATTEMPTS` or per-job `maxAttempts`.
 - Pack list responses can be filtered by `tenantId`, `status`, and `search`; sorted by `updatedAt`, `createdAt`, `ticketId`, or `confidence`; and paged with `limit` and `offset`.
 - API validation and internal-error responses are sanitized so implementation details are kept in logs, not client payloads.
-- Repro packs include a minimal repro sequence, alternative repro paths, environment deltas, regression/new-bug classification, redaction audit report, and compliance summary.
+- Repro packs include a minimal repro sequence, alternative repro paths, environment deltas, regression/new-bug classification, redaction audit report, compliance summary, automated test scaffold, similar-bug dedupe hints, blame-based assignee suggestion, and fix validation checklist.
+- Slack notifications post a pending review request with Approve/Edit/Discard action values after synchronous pack creation and an approval summary after review approval.
 - `DATA_RESIDENCY_MODE=offline` and tenant `dataResidencyMode: "offline"` disable outbound LLM repro suggestions.
 - `REQUIRE_CUSTOMER_CONSENT=true` or tenant `requireCustomerConsent: true` blocks pack creation until `customerConsentConfirmed` is supplied.
 - Redaction covers regex patterns, sensitive field names, locale-specific identifiers, masked emails, and phone numbers written as words.
@@ -241,7 +249,8 @@ The suite covers:
 - smarter repro sequencing, environment deltas, regression classification, and redaction audit metadata
 - markdown/json artifact generation
 - local HTTP and async job flows
-- real-adapter style integration tests with mocked Zendesk/GitHub/Jira backends
+- real-adapter style integration tests with mocked Zendesk/GitHub/Jira/Linear backends
+- Slack review-request and approval webhook payloads
 - tenant auth behavior and cross-tenant access denial
 - durable job recovery and dead-letter transitions
 - failed job retry, audit listing, pack filtering/search/sort, and sanitized API errors
@@ -260,3 +269,4 @@ The suite covers:
 - SQLite is the included production-ready storage backend; large multi-instance deployments should swap in a shared database backend behind the storage interface.
 - The queue is durable and restart-safe but still in-process; distributed workers would be a next step for horizontal scale.
 - Cloud secret managers are adapter boundaries today, not bundled SDK integrations.
+- Slack buttons are emitted as webhook action values; receiving interactive callbacks still needs a Slack app endpoint outside the included incoming-webhook path.

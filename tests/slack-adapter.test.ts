@@ -85,4 +85,35 @@ describe("Slack notification provider", () => {
     expect(body.text).toContain("Tenant: Acme Support");
     expect(body.text).toContain("https://repro.example.test/packs/zendesk-12345?tenantId=acme");
   });
+
+  it("posts a review request with approve, edit, and discard actions", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = new SlackNotificationProvider(tenant, config, logger);
+    await provider.postReviewRequest({
+      tenantId: "acme",
+      tenantName: "Acme Support",
+      ticketId: "zendesk-12345",
+      summary: "Checkout fails after submit",
+      confidence: 0.82,
+      packUrl: "https://repro.example.test/packs/zendesk-12345?tenantId=acme"
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string) as {
+      channel: string;
+      text: string;
+      blocks: Array<{ type: string; elements?: Array<{ value: string }>; text?: { text: string } }>;
+    };
+    const actionValues = body.blocks.flatMap((block) => block.elements?.map((element) => element.value) ?? []);
+
+    expect(body.channel).toBe("#repro-approvals");
+    expect(body.text).toContain("Review requested");
+    expect(body.blocks.some((block) => block.text?.text.includes("Open repro pack"))).toBe(true);
+    expect(actionValues).toEqual([
+      "approve:acme:zendesk-12345",
+      "edit:acme:zendesk-12345",
+      "discard:acme:zendesk-12345"
+    ]);
+  });
 });

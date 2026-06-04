@@ -84,6 +84,21 @@ function makePack(tenantId: string, ticketId: string, updatedAt: string): Stored
         customerConsentRequired: false,
         customerConsentConfirmed: false
       },
+      automatedTestScaffold: {
+        framework: "Vitest",
+        language: "TypeScript",
+        fileHint: "checkout.spec.ts",
+        skeleton: [],
+        assertions: []
+      },
+      similarBugHints: [],
+      blameAssigneeSuggestion: {
+        assignee: "not available",
+        rationale: "No ownership signal was available.",
+        files: [],
+        confidence: 0
+      },
+      fixValidationChecklist: [],
       llmSuggestions: null
     },
     issueDraft: {

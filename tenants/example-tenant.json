@@ -73,6 +73,13 @@
         "customfield_10001": "repro-pack"
       }
     },
+    "linear": {
+      "type": "linear",
+      "baseUrl": "https://api.linear.app/graphql",
+      "teamId": "team-example",
+      "token": { "provider": "env", "env": "LINEAR_API_TOKEN" },
+      "labels": ["support", "bug", "repro-pack"]
+    },
     "slack": {
       "enabled": false,
       "webhookUrl": { "provider": "env", "env": "SLACK_WEBHOOK_URL" },
