@@ -227,6 +227,17 @@ export const FixValidationChecklistItemSchema = z.object({
   source: z.enum(["repro_step", "evidence", "regression", "sanitization"]).default("evidence")
 });
 
+export const CustomerImpactScoreSchema = z
+  .object({
+    score: z.number().min(0).max(100).default(0),
+    affectedTenantCount: z.number().int().nonnegative().default(1),
+    affectedUserCount: z.number().int().nonnegative().default(0),
+    accountTier: z.string().default("not available"),
+    recurrenceCount: z.number().int().nonnegative().default(0),
+    reasoning: z.string().default("No customer-impact signals were available.")
+  })
+  .default({});
+
 export const ConfidenceScoreSchema = z.object({
   overall: z.number().min(0).max(1),
   reasoning: z.string(),
@@ -280,6 +291,7 @@ export const ReproPackSchema = z.object({
   similarBugHints: z.array(SimilarBugHintSchema).default([]),
   blameAssigneeSuggestion: BlameAssigneeSuggestionSchema,
   fixValidationChecklist: z.array(FixValidationChecklistItemSchema).default([]),
+  customerImpactScore: CustomerImpactScoreSchema,
   llmSuggestions: LlmSuggestionsSchema
 });
 
@@ -384,6 +396,7 @@ export type AutomatedTestScaffold = z.infer<typeof AutomatedTestScaffoldSchema>;
 export type SimilarBugHint = z.infer<typeof SimilarBugHintSchema>;
 export type BlameAssigneeSuggestion = z.infer<typeof BlameAssigneeSuggestionSchema>;
 export type FixValidationChecklistItem = z.infer<typeof FixValidationChecklistItemSchema>;
+export type CustomerImpactScore = z.infer<typeof CustomerImpactScoreSchema>;
 export type ConfidenceScore = z.infer<typeof ConfidenceScoreSchema>;
 export type LlmSuggestions = z.infer<typeof LlmSuggestionsSchema>;
 export type ReproPack = z.infer<typeof ReproPackSchema>;

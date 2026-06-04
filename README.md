@@ -11,6 +11,9 @@ This repo now supports:
 - real GitHub, Jira, and Linear sync adapters
 - native Sentry/Datadog log ingestion plus generic HTTP adapters for logs, session replay, feature flags, and release metadata
 - Slack review-request and approval notifications
+- analytics summaries for confidence trends, support-to-close cycle time, feature flag correlation, and customer impact
+- replay fixture export for local reproduction without live providers
+- typed SDK helpers for custom source adapters
 - tenant-aware auth and access control
 - durable async job processing with restart recovery
 - pluggable persistence with filesystem and SQLite backends
@@ -134,6 +137,7 @@ Protected endpoints:
 - `GET /jobs/:id`
 - `POST /jobs/:id/retry`
 - `GET /audit-events`
+- `GET /analytics/summary`
 - `GET /packs`
 - `GET /packs/:ticketId`
 - `POST /packs/:ticketId/review`
@@ -179,6 +183,12 @@ List audit events:
 corepack pnpm cli -- audit-events --tenant acme --action job.dead_lettered --outcome error
 ```
 
+Analytics summary:
+
+```bash
+corepack pnpm cli -- analytics --tenant acme
+```
+
 Search packs:
 
 ```bash
@@ -201,6 +211,12 @@ Write sync:
 
 ```bash
 corepack pnpm cli -- sync-issues --tenant acme --ticket zendesk-12345 --target github --target jira --target linear --write
+```
+
+Export a replay fixture:
+
+```bash
+corepack pnpm cli -- export-replay --tenant acme --ticket zendesk-12345
 ```
 
 ## Production deployment
@@ -230,6 +246,7 @@ Operational details are in [docs/production-runbook.md](C:\Users\USER\OneDrive\D
 - API validation and internal-error responses are sanitized so implementation details are kept in logs, not client payloads.
 - Repro packs include a minimal repro sequence, alternative repro paths, environment deltas, regression/new-bug classification, redaction audit report, compliance summary, automated test scaffold, similar-bug dedupe hints, blame-based assignee suggestion, and fix validation checklist.
 - Slack notifications post a pending review request with Approve/Edit/Discard action values after synchronous pack creation and an approval summary after review approval.
+- Analytics summaries are derived from stored sanitized packs and audit events. Support-to-close cycle time currently uses first successful issue sync as the strongest close signal, falling back to approval time.
 - `DATA_RESIDENCY_MODE=offline` and tenant `dataResidencyMode: "offline"` disable outbound LLM repro suggestions.
 - `REQUIRE_CUSTOMER_CONSENT=true` or tenant `requireCustomerConsent: true` blocks pack creation until `customerConsentConfirmed` is supplied.
 - Redaction covers regex patterns, sensitive field names, locale-specific identifiers, masked emails, and phone numbers written as words.
@@ -251,6 +268,8 @@ The suite covers:
 - local HTTP and async job flows
 - real-adapter style integration tests with mocked Zendesk/GitHub/Jira/Linear backends
 - Slack review-request and approval webhook payloads
+- analytics summary endpoint output
+- replay fixture export
 - tenant auth behavior and cross-tenant access denial
 - durable job recovery and dead-letter transitions
 - failed job retry, audit listing, pack filtering/search/sort, and sanitized API errors
@@ -263,6 +282,7 @@ The suite covers:
 - Implement the adapter under [src/providers](C:\Users\USER\OneDrive\Desktop\New folder\Coding\Project no 2\src\providers)
 - Register it in [src/providers/factory.ts](C:\Users\USER\OneDrive\Desktop\New folder\Coding\Project no 2\src\providers\factory.ts)
 - Extend the tenant config schema in [src/types/integrations.ts](C:\Users\USER\OneDrive\Desktop\New folder\Coding\Project no 2\src\types\integrations.ts)
+- For proprietary/custom sources, import helper builders from `src/sdk.ts` or the package entrypoint: `createSupportProvider`, `createLogsProvider`, `providerSuccess`, and `providerUnavailable`.
 
 ## Current limits
 
@@ -270,3 +290,4 @@ The suite covers:
 - The queue is durable and restart-safe but still in-process; distributed workers would be a next step for horizontal scale.
 - Cloud secret managers are adapter boundaries today, not bundled SDK integrations.
 - Slack buttons are emitted as webhook action values; receiving interactive callbacks still needs a Slack app endpoint outside the included incoming-webhook path.
+- A public interactive demo UI is not enabled in the API by default; expose replay fixtures through a controlled frontend or gateway rather than opening processing endpoints anonymously.

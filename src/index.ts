@@ -6,3 +6,4 @@ export { ReproStore } from "./persistence/store";
 export { JobRunner } from "./jobs/job-runner";
 export * from "./types/schemas";
 export * from "./types/integrations";
+export * from "./sdk";

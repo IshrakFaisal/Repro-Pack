@@ -99,6 +99,14 @@ function makePack(tenantId: string, ticketId: string, updatedAt: string): Stored
         confidence: 0
       },
       fixValidationChecklist: [],
+      customerImpactScore: {
+        score: 10,
+        affectedTenantCount: 1,
+        affectedUserCount: 0,
+        accountTier: "not available",
+        recurrenceCount: 0,
+        reasoning: "test"
+      },
       llmSuggestions: null
     },
     issueDraft: {

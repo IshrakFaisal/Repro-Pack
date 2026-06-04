@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type {
   AutomatedTestScaffold,
   BlameAssigneeSuggestion,
+  CustomerImpactScore,
   EnrichedContext,
   EnvironmentDelta,
   FixValidationChecklistItem,
@@ -333,4 +334,72 @@ export function buildFixValidationChecklist(
   }
 
   return items.slice(0, 8);
+}
+
+function numberFromUnknown(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+export function scoreCustomerImpact(
+  context: EnrichedContext,
+  normalized: NormalizedEvidenceBundle,
+  similarBugHints: SimilarBugHint[]
+): CustomerImpactScore {
+  const customFields = context.ticket.customFields;
+  const affectedUserCount =
+    numberFromUnknown(customFields.affectedUserCount) ??
+    numberFromUnknown(customFields.affected_users) ??
+    (context.ticket.userId ? 1 : 0);
+  const affectedTenantCount =
+    numberFromUnknown(customFields.affectedTenantCount) ??
+    numberFromUnknown(customFields.affected_tenants) ??
+    (context.ticket.accountId ? 1 : 0);
+  const recurrenceCount =
+    numberFromUnknown(customFields.recurrenceCount) ??
+    numberFromUnknown(customFields.recurrence_count) ??
+    similarBugHints.length;
+  const accountTier =
+    String(customFields.accountTier ?? customFields.account_tier ?? customFields.plan ?? "not available");
+  const severity = `${context.ticket.severity ?? context.ticket.priority ?? ""}`.toLowerCase();
+
+  let score = 10;
+  score += Math.min(25, affectedUserCount * 2);
+  score += Math.min(20, affectedTenantCount * 5);
+  score += Math.min(20, recurrenceCount * 4);
+  if (/enterprise|premium|paid|pro/i.test(accountTier)) {
+    score += 15;
+  }
+  if (/critical|urgent|high/.test(severity)) {
+    score += 15;
+  }
+  if (normalized.logs.some((entry) => entry.level.toLowerCase() === "error")) {
+    score += 8;
+  }
+  if (normalized.featureFlags.length > 0) {
+    score += 4;
+  }
+
+  const factors = [
+    `${affectedUserCount} affected user signal(s)`,
+    `${affectedTenantCount} affected tenant signal(s)`,
+    `${recurrenceCount} recurrence signal(s)`,
+    `account tier: ${accountTier}`,
+    severity ? `severity: ${severity}` : undefined
+  ].filter((entry): entry is string => Boolean(entry));
+
+  return {
+    score: Math.min(100, Math.round(score)),
+    affectedTenantCount,
+    affectedUserCount,
+    accountTier,
+    recurrenceCount,
+    reasoning: factors.join("; ")
+  };
 }

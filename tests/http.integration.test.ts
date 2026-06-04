@@ -397,6 +397,11 @@ describe("http endpoints", () => {
       url: "/packs?sort=ticketId&direction=asc&limit=2",
       headers
     });
+    const analyticsResponse = await app.inject({
+      method: "GET",
+      url: "/analytics/summary",
+      headers
+    });
     await app.close();
 
     expect(response.statusCode).toBe(200);
@@ -423,6 +428,19 @@ describe("http endpoints", () => {
       featureFlags: expect.any(String),
       release: expect.any(String)
     });
+    expect(analyticsResponse.statusCode).toBe(200);
+    expect(analyticsResponse.json()).toMatchObject({
+      packCount: 2,
+      customerImpact: {
+        averageScore: expect.any(Number),
+        topPacks: expect.any(Array)
+      },
+      supportToCloseCycle: {
+        closedPackCount: 1
+      }
+    });
+    expect(analyticsResponse.json().confidenceTrend.length).toBeGreaterThan(0);
+    expect(analyticsResponse.json().featureFlagCorrelation.length).toBeGreaterThan(0);
   });
 });
 

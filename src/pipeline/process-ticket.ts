@@ -14,6 +14,7 @@ import {
   buildSimilarBugHints,
   classifyRegression,
   detectEnvironmentDeltas,
+  scoreCustomerImpact,
   suggestBlameAssignee
 } from "../repro/repro-intelligence";
 import { scoreConfidence } from "../scoring/confidence-scorer";
@@ -146,6 +147,7 @@ export async function processTicket(
     const automatedTestScaffold = buildAutomatedTestScaffold(normalizedEngineering, reproSteps);
     const similarBugHints = buildSimilarBugHints(context, normalized, regressionClassification);
     const blameAssigneeSuggestion = suggestBlameAssignee(normalized);
+    const customerImpactScore = scoreCustomerImpact(context, normalized, similarBugHints);
     const fixValidationChecklist = buildFixValidationChecklist(
       reproSteps,
       normalized,
@@ -197,6 +199,7 @@ export async function processTicket(
       similarBugHints,
       blameAssigneeSuggestion,
       fixValidationChecklist,
+      customerImpactScore,
       llmSuggestions
     });
 

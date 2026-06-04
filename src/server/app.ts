@@ -8,6 +8,7 @@ import { enrichContext } from "../enrichment/context-enrichment";
 import { normalizeEvidence } from "../normalization/evidence-normalizer";
 import { createRuntime } from "../runtime/app-runtime";
 import { syncIssuesForPack } from "../issues/issue-sync";
+import { buildAnalyticsSummary } from "../analytics/team-intelligence";
 import type { StoredReproPack } from "../types/schemas";
 import { WebhookDispatcher } from "../webhooks/dispatcher";
 import type { PackWebhookEvent } from "../webhooks/events";
@@ -325,6 +326,18 @@ export async function createApp() {
       ticketId: query.ticketId
     });
     return events.slice(query.offset, query.limit ? query.offset + query.limit : undefined);
+  });
+
+  app.get("/analytics/summary", async (request) => {
+    const actor = ensureRole((request as FastifyRequestWithActor).authActor, "read");
+    const query = TenantQuerySchema.parse(request.query);
+    const tenantId = resolveListTenantScope(actor, query.tenantId);
+    const [packs, auditEvents] = await Promise.all([
+      store.listPacks(tenantId),
+      store.listAuditEvents({ tenantId })
+    ]);
+
+    return buildAnalyticsSummary({ tenantId, packs, auditEvents });
   });
 
   app.get("/jobs/:id", async (request, reply) => {

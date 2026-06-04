@@ -127,6 +127,18 @@ function formatFixValidationChecklist(reproPack: ReproPack): string {
     .join("\n");
 }
 
+function formatCustomerImpactScore(reproPack: ReproPack): string {
+  const impact = reproPack.customerImpactScore;
+  return [
+    `- Score: ${impact.score}/100`,
+    `- Affected tenants: ${impact.affectedTenantCount}`,
+    `- Affected users: ${impact.affectedUserCount}`,
+    `- Account tier: ${impact.accountTier}`,
+    `- Recurrence: ${impact.recurrenceCount}`,
+    `- Reasoning: ${impact.reasoning}`
+  ].join("\n");
+}
+
 function formatTimeline(timeline: ReproPack["timeline"]): string {
   if (timeline.length === 0) {
     return "- not available";
@@ -208,6 +220,9 @@ ${formatBlameAssignee(reproPack)}
 
 ## Fix validation checklist
 ${formatFixValidationChecklist(reproPack)}
+
+## Customer impact score
+${formatCustomerImpactScore(reproPack)}
 
 ## Expected vs actual
 - Expected: ${reproPack.expectedBehavior}

@@ -30,6 +30,8 @@ Watch for:
 - failed or `dead_lettered` jobs that repeatedly fail after explicit retry
 - repeated provider retry/failure patterns
 - Sentry/Datadog provider auth, timeout, or rate-limit failures
+- falling confidence trend or increasing support-to-close cycle time in analytics summaries
+- feature flags with repeated regression correlations
 - auth failures
 - config errors for missing tenant files or unresolved secrets
 - issue sync create/update spikes
@@ -49,6 +51,7 @@ Queue operations:
 - Jobs are dead-lettered after `QUEUE_MAX_ATTEMPTS` by default, or a lower per-job `maxAttempts` when supplied for async processing
 - Dead-lettered jobs are terminal and are intentionally not eligible for retry
 - List audit events with `GET /audit-events?tenantId=<tenant>&action=<action>&outcome=<success|error>` or `corepack pnpm cli -- audit-events --tenant <tenant> --action <action>`
+- Review analytics with `GET /analytics/summary?tenantId=<tenant>` or `corepack pnpm cli -- analytics --tenant <tenant>`
 - Repeated retry failures usually mean the original ticket lookup, tenant config, or provider credentials need correction before retrying again
 
 ## Secret configuration
@@ -75,6 +78,15 @@ Add the provider implementation in [src/secrets/manager.ts](C:\Users\USER\OneDri
 - Each generated repro pack includes a redaction audit report with redaction counts, classifications, and a checksum.
 - Review `sanitizationReport` and `redactionAuditReport` before approving external issue sync for regulated tenants.
 - Review `automatedTestScaffold`, `similarBugHints`, `blameAssigneeSuggestion`, and `fixValidationChecklist` as generated engineering guidance. They are derived from sanitized evidence and should be confirmed by the owning engineering team.
+- `customerImpactScore` is generated from sanitized tenant/user count hints, account tier, recurrence signals, severity, flags, and error evidence. Treat it as prioritization guidance, not billing or support policy truth.
+
+## Analytics and replay
+
+- Confidence trend groups stored packs by creation date and averages `confidence.overall`.
+- Support-to-close cycle time uses first successful issue sync as the close signal, falling back to approval time when sync has not happened.
+- Feature flag correlation aggregates stored packs by flag/variant, regression classification, confidence, and impact score.
+- Replay fixture export writes sanitized `ticket.json`, provider fixture files when available, `repro-pack.json`, `issue.md`, and a README under `ARTIFACT_OUTPUT_DIR/replay-fixtures/<tenant>/<ticket>` by default.
+- Replay exported fixtures are safe for local developer workflows because they are built from sanitized stored packs, but still keep artifact storage private by default.
 
 ## Provider notes
 
