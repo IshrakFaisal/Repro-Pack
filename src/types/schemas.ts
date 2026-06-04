@@ -162,6 +162,43 @@ export const ReproStepSchema = z.object({
   confidence: z.number().min(0).max(1)
 });
 
+export const ReproPathSchema = z.object({
+  name: z.string(),
+  steps: z.array(ReproStepSchema).default([]),
+  rationale: z.string(),
+  confidence: z.number().min(0).max(1)
+});
+
+export const EnvironmentDeltaSchema = z.object({
+  field: z.string(),
+  ticketValue: z.string().default("not available"),
+  observedValue: z.string().default("not available"),
+  risk: z.enum(["low", "medium", "high"]).default("medium"),
+  reason: z.string()
+});
+
+export const RegressionClassificationSchema = z.object({
+  classification: z.enum(["likely_regression", "likely_new_bug", "unknown"]),
+  reasoning: z.string(),
+  signals: z.array(z.string()).default([])
+});
+
+export const RedactionAuditReportSchema = z.object({
+  reportId: z.string(),
+  ticketId: z.string(),
+  generatedAt: z.string(),
+  redactionCount: z.number().int().nonnegative(),
+  classifications: z.record(z.number().int().nonnegative()).default({}),
+  checksum: z.string()
+});
+
+export const ComplianceSummarySchema = z.object({
+  dataResidencyMode: z.enum(["standard", "offline"]).default("standard"),
+  llmUsed: z.boolean().default(false),
+  customerConsentRequired: z.boolean().default(false),
+  customerConsentConfirmed: z.boolean().default(false)
+});
+
 export const ConfidenceScoreSchema = z.object({
   overall: z.number().min(0).max(1),
   reasoning: z.string(),
@@ -201,6 +238,16 @@ export const ReproPackSchema = z.object({
   sanitizationReport: z.array(SanitizationReportItemSchema),
   evidence: z.array(EvidenceItemSchema),
   confidence: ConfidenceScoreSchema,
+  minimalReproSequence: z.array(ReproStepSchema).default([]),
+  alternativeReproPaths: z.array(ReproPathSchema).default([]),
+  environmentDeltas: z.array(EnvironmentDeltaSchema).default([]),
+  regressionClassification: RegressionClassificationSchema.default({
+    classification: "unknown",
+    reasoning: "No release or history signals were available.",
+    signals: []
+  }),
+  redactionAuditReport: RedactionAuditReportSchema.nullable().default(null),
+  compliance: ComplianceSummarySchema.default({}),
   llmSuggestions: LlmSuggestionsSchema
 });
 
@@ -259,6 +306,7 @@ export const ProcessingJobSchema = z.object({
   tenantId: z.string().default("default"),
   dryRun: z.boolean(),
   writeArtifacts: z.boolean(),
+  customerConsentConfirmed: z.boolean().default(false),
   attempts: z.number().int().nonnegative().default(0),
   maxAttempts: z.number().int().positive().default(3),
   lastAttemptedAt: z.string().optional(),
@@ -295,6 +343,11 @@ export type EvidenceItem = z.infer<typeof EvidenceItemSchema>;
 export type ProviderResult = z.infer<typeof ProviderResultSchema>;
 export type SanitizationReportItem = z.infer<typeof SanitizationReportItemSchema>;
 export type ReproStep = z.infer<typeof ReproStepSchema>;
+export type ReproPath = z.infer<typeof ReproPathSchema>;
+export type EnvironmentDelta = z.infer<typeof EnvironmentDeltaSchema>;
+export type RegressionClassification = z.infer<typeof RegressionClassificationSchema>;
+export type RedactionAuditReport = z.infer<typeof RedactionAuditReportSchema>;
+export type ComplianceSummary = z.infer<typeof ComplianceSummarySchema>;
 export type ConfidenceScore = z.infer<typeof ConfidenceScoreSchema>;
 export type LlmSuggestions = z.infer<typeof LlmSuggestionsSchema>;
 export type ReproPack = z.infer<typeof ReproPackSchema>;

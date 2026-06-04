@@ -23,6 +23,8 @@ export type AppConfig = {
   baseUrl?: string;
   redactIps: boolean;
   redactDirectIdentifiers: boolean;
+  dataResidencyMode: "standard" | "offline";
+  requireCustomerConsent: boolean;
   appVersion: string;
   buildHash: string;
   apiKey?: string;
@@ -56,6 +58,8 @@ export function loadConfig(cwd = process.cwd()): AppConfig {
     retentionDays: Number(process.env.RETENTION_DAYS ?? 30),
     redactIps: toBoolean(process.env.REDACT_IPS, true),
     redactDirectIdentifiers: toBoolean(process.env.REDACT_DIRECT_IDENTIFIERS, true),
+    dataResidencyMode: process.env.DATA_RESIDENCY_MODE === "offline" ? "offline" : "standard",
+    requireCustomerConsent: toBoolean(process.env.REQUIRE_CUSTOMER_CONSENT, false),
     appVersion: process.env.APP_VERSION ?? "1.0.0",
     buildHash: process.env.BUILD_HASH ?? "not available",
     baseUrl: process.env.BASE_URL?.trim().replace(/\/$/, "") || undefined,

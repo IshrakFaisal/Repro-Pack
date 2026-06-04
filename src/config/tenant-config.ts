@@ -46,6 +46,8 @@ export class TenantConfigStore {
       name: raw.name,
       redactDirectIdentifiers: raw.redactDirectIdentifiers,
       retentionDays: raw.retentionDays,
+      dataResidencyMode: raw.dataResidencyMode,
+      requireCustomerConsent: raw.requireCustomerConsent,
       llm: raw.llm
         ? ResolvedLlmConfigSchema.parse({
             ...raw.llm,

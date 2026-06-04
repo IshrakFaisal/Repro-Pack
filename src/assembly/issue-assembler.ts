@@ -26,6 +26,46 @@ function formatReproSteps(reproSteps: ReproStep[]): string {
     .join("\n");
 }
 
+function formatAlternativePaths(reproPack: ReproPack): string {
+  if (reproPack.alternativeReproPaths.length === 0) {
+    return "- not available";
+  }
+
+  return reproPack.alternativeReproPaths
+    .map((path) => {
+      const steps = path.steps.map((step, index) => `  ${index + 1}. ${step.step} [${step.source}, confidence=${step.confidence}]`).join("\n");
+      return `- ${path.name} (confidence=${path.confidence}): ${path.rationale}\n${steps}`;
+    })
+    .join("\n");
+}
+
+function formatEnvironmentDeltas(reproPack: ReproPack): string {
+  if (reproPack.environmentDeltas.length === 0) {
+    return "- none detected";
+  }
+
+  return reproPack.environmentDeltas
+    .map(
+      (delta) =>
+        `- ${delta.field}: ticket=\`${delta.ticketValue}\`, observed=\`${delta.observedValue}\`, risk=${delta.risk}. ${delta.reason}`
+    )
+    .join("\n");
+}
+
+function formatRedactionAudit(reproPack: ReproPack): string {
+  if (!reproPack.redactionAuditReport) {
+    return "- not available";
+  }
+
+  return [
+    `- Report ID: ${reproPack.redactionAuditReport.reportId}`,
+    `- Generated: ${reproPack.redactionAuditReport.generatedAt}`,
+    `- Redactions: ${reproPack.redactionAuditReport.redactionCount}`,
+    `- Classifications: ${JSON.stringify(reproPack.redactionAuditReport.classifications)}`,
+    `- Checksum: ${reproPack.redactionAuditReport.checksum}`
+  ].join("\n");
+}
+
 function formatLlmSuggestions(reproPack: ReproPack): string {
   if (!reproPack.llmSuggestions || reproPack.llmSuggestions.steps.length === 0) {
     return "- not available";
@@ -85,18 +125,25 @@ export function assembleArtifacts(input: {
   confidence: ConfidenceScore;
   sanitizedPayload: SanitizedPayload;
   openQuestions: string[];
+  sanitizedComplaintText: string;
 }): { reproPack: ReproPack; markdown: string; issueDraft: IssueDraft } {
-  const { ticket, reproPack, confidence, sanitizedPayload, openQuestions } = input;
+  const { ticket, reproPack, confidence, sanitizedPayload, openQuestions, sanitizedComplaintText } = input;
   const markdown = `# ${reproPack.summary}
 
 ## Summary
 ${reproPack.summary}
 
 ## Customer complaint
-${ticket.complaintText}
+${sanitizedComplaintText}
 
 ## Likely repro steps
 ${formatReproSteps(reproPack.reproSteps)}
+
+## Minimal repro sequence
+${formatReproSteps(reproPack.minimalReproSequence)}
+
+## Alternative repro paths
+${formatAlternativePaths(reproPack)}
 
 ## AI-suggested step overlay
 ${formatLlmSuggestions(reproPack)}
@@ -112,6 +159,14 @@ ${formatLlmSuggestions(reproPack)}
 - OS: ${formatValue(reproPack.environment.os)}
 - App version: ${formatValue(reproPack.environment.appVersion)}
 - Build hash: ${formatValue(reproPack.environment.buildHash)}
+
+## Environment deltas
+${formatEnvironmentDeltas(reproPack)}
+
+## Regression classification
+- Classification: ${reproPack.regressionClassification.classification}
+- Reasoning: ${reproPack.regressionClassification.reasoning}
+- Signals: ${reproPack.regressionClassification.signals.length > 0 ? reproPack.regressionClassification.signals.join(", ") : "not available"}
 
 ## Feature flags
 ${formatFeatureFlags(reproPack.featureFlags)}
@@ -131,6 +186,15 @@ ${JSON.stringify(sanitizedPayload.payload, null, 2)}
 - Overall confidence: ${confidence.overall}
 - Reasoning: ${confidence.reasoning}
 ${formatEvidence(reproPack)}
+
+## Redaction audit report
+${formatRedactionAudit(reproPack)}
+
+## Compliance
+- Data residency mode: ${reproPack.compliance.dataResidencyMode}
+- LLM used: ${reproPack.compliance.llmUsed}
+- Customer consent required: ${reproPack.compliance.customerConsentRequired}
+- Customer consent confirmed: ${reproPack.compliance.customerConsentConfirmed}
 
 ## Open questions
 ${formatOpenQuestions(openQuestions)}

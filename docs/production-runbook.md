@@ -67,6 +67,13 @@ The runtime ships with an env-backed secret manager plus explicit adapter bounda
 
 Add the provider implementation in [src/secrets/manager.ts](C:\Users\USER\OneDrive\Desktop\New folder\Coding\Project no 2\src\secrets\manager.ts) and wire it into `createSecretManager()`.
 
+## Data safety controls
+
+- Set `DATA_RESIDENCY_MODE=offline` globally or `dataResidencyMode: "offline"` per tenant to prevent outbound LLM calls.
+- Set `REQUIRE_CUSTOMER_CONSENT=true` globally or `requireCustomerConsent: true` per tenant to block repro pack creation until requests include `customerConsentConfirmed`.
+- Each generated repro pack includes a redaction audit report with redaction counts, classifications, and a checksum.
+- Review `sanitizationReport` and `redactionAuditReport` before approving external issue sync for regulated tenants.
+
 ## Retention and cleanup
 
 - `RETENTION_DAYS` controls cleanup for jobs, packs, and audit events
@@ -81,3 +88,4 @@ Add the provider implementation in [src/secrets/manager.ts](C:\Users\USER\OneDri
 - If provider credentials rotate, restart the service after secret updates when using env-backed secrets
 - Tenant-scoped API keys cannot access another tenant's jobs, packs, reviews, exports, debug lookups, or issue sync flow; use the global key only for controlled operations/admin workflows
 - Client-facing validation and internal error payloads are sanitized; inspect server logs and audit events for detailed failure context
+- For residency incidents, confirm `compliance.dataResidencyMode` is `offline` and `compliance.llmUsed` is `false` in the stored repro pack.

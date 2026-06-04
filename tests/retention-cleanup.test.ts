@@ -30,6 +30,8 @@ function makeConfig(baseDir: string): AppConfig {
     retentionDays: 30,
     redactIps: true,
     redactDirectIdentifiers: true,
+    dataResidencyMode: "standard",
+    requireCustomerConsent: false,
     appVersion: "test",
     buildHash: "test",
     apiKey: "test-key"
@@ -67,6 +69,21 @@ function makePack(tenantId: string, ticketId: string, updatedAt: string): Stored
       sanitizationReport: [],
       evidence: [],
       confidence: { overall: 0.82, reasoning: "test", factors: [] },
+      minimalReproSequence: [{ step: "Open /checkout.", source: "telemetry", confidence: 0.8 }],
+      alternativeReproPaths: [],
+      environmentDeltas: [],
+      regressionClassification: {
+        classification: "unknown",
+        reasoning: "test",
+        signals: []
+      },
+      redactionAuditReport: null,
+      compliance: {
+        dataResidencyMode: "standard",
+        llmUsed: false,
+        customerConsentRequired: false,
+        customerConsentConfirmed: false
+      },
       llmSuggestions: null
     },
     issueDraft: {

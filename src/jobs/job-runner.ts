@@ -54,6 +54,7 @@ export class JobRunner {
       tenantId,
       dryRun: Boolean(input.dryRun),
       writeArtifacts: Boolean(input.writeArtifacts),
+      customerConsentConfirmed: Boolean(input.customerConsentConfirmed),
       attempts: 0,
       maxAttempts: input.maxAttempts ?? this.config.queueMaxAttempts,
       sourceLookup: {
@@ -121,6 +122,7 @@ export class JobRunner {
         tenantId: job.tenantId,
         dryRun: job.dryRun,
         writeArtifacts: job.writeArtifacts,
+        customerConsentConfirmed: job.customerConsentConfirmed,
         fixtureId: job.sourceLookup.fixtureId,
         ticketPath: job.sourceLookup.ticketPath,
         supportTicketId: job.sourceLookup.supportTicketId

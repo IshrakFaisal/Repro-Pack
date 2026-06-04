@@ -39,4 +39,29 @@ describe("sanitizer", () => {
     });
     expect(result.report.length).toBeGreaterThanOrEqual(8);
   });
+
+  it("detects semantic PII, masked emails, phone words, and locale IDs", async () => {
+    const { config } = await createTestSetup();
+    const result = sanitizePayload(
+      {
+        fullName: "Jane Customer",
+        dateOfBirth: "1990-01-01",
+        nationalId: "BD-1234567890",
+        maskedEmail: "jane.customer at example dot test",
+        supportNote: "Call me at two zero two five five five zero one eight two"
+      },
+      config
+    );
+
+    expect(result.payload).toMatchObject({
+      fullName: "[REDACTED:PII]",
+      dateOfBirth: "[REDACTED:PII]",
+      nationalId: "[REDACTED:IDENTIFIER]",
+      maskedEmail: "[REDACTED:EMAIL]",
+      supportNote: "Call me at [REDACTED:PHONE]"
+    });
+    expect(result.report.map((item) => item.classification)).toEqual(
+      expect.arrayContaining(["semantic-pii", "locale-specific-identifier", "masked-email", "phone-words"])
+    );
+  });
 });

@@ -6,6 +6,9 @@ const phonePattern = /(?<!\d)(?:\+?\d[\d().\s-]{7,}\d)(?!\d)/g;
 const bearerPattern = /Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi;
 const ipv4Pattern = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
 const genericSecretPattern = /\b[A-Za-z0-9_\/+=-]{24,}\b/g;
+const maskedEmailPattern = /\b[A-Z0-9._%+-]+\s+(?:at|\[at\]|\(at\))\s+[A-Z0-9.-]+\s+(?:dot|\[dot\]|\(dot\))\s+[A-Z]{2,}\b/gi;
+const phoneWordsPattern =
+  /\b(?:zero|one|two|three|four|five|six|seven|eight|nine|oh)(?:[\s-]+(?:zero|one|two|three|four|five|six|seven|eight|nine|oh)){6,}\b/gi;
 
 function hasMatch(pattern: RegExp, input: string): boolean {
   pattern.lastIndex = 0;
@@ -41,7 +44,7 @@ function replacement(label: string): string {
   return `[REDACTED:${label}]`;
 }
 
-function keyIndicatesSensitiveField(key: string): "api-key" | "cookie" | "auth-header" | "direct-id" | undefined {
+function keyIndicatesSensitiveField(key: string): "api-key" | "cookie" | "auth-header" | "direct-id" | "semantic-pii" | "locale-id" | undefined {
   const normalized = key.toLowerCase();
 
   if (["authorization", "proxy-authorization", "auth", "authheader"].includes(normalized)) {
@@ -59,6 +62,45 @@ function keyIndicatesSensitiveField(key: string): "api-key" | "cookie" | "auth-h
     )
   ) {
     return "direct-id";
+  }
+  if (
+    [
+      "ssn",
+      "socialsecuritynumber",
+      "nationalid",
+      "national_id",
+      "passport",
+      "passportnumber",
+      "driverlicense",
+      "driverslicense",
+      "taxid",
+      "tax_id",
+      "cpf",
+      "cnpj",
+      "aadhaar",
+      "nid"
+    ].includes(normalized)
+  ) {
+    return "locale-id";
+  }
+  if (
+    [
+      "name",
+      "fullname",
+      "full_name",
+      "firstname",
+      "first_name",
+      "lastname",
+      "last_name",
+      "address",
+      "postaladdress",
+      "postal_address",
+      "dateofbirth",
+      "date_of_birth",
+      "dob"
+    ].includes(normalized)
+  ) {
+    return "semantic-pii";
   }
 
   return undefined;
@@ -105,10 +147,23 @@ function sanitizeStringValue(
     pushReport(report, path, "mask", "direct-identifier", "replace_entire_value");
     return replacement("IDENTIFIER");
   }
+  if (keyType === "locale-id") {
+    pushReport(report, path, "mask", "locale-specific-identifier", "replace_entire_value");
+    return replacement("IDENTIFIER");
+  }
+  if (keyType === "semantic-pii" && config.redactDirectIdentifiers) {
+    pushReport(report, path, "mask", "semantic-pii", "replace_entire_value");
+    return replacement("PII");
+  }
 
   if (hasMatch(emailPattern, current)) {
     current = current.replace(emailPattern, replacement("EMAIL"));
     pushReport(report, path, "mask", "email", "pattern_replace");
+  }
+
+  if (hasMatch(maskedEmailPattern, current)) {
+    current = current.replace(maskedEmailPattern, replacement("EMAIL"));
+    pushReport(report, path, "mask", "masked-email", "pattern_replace");
   }
 
   if (hasMatch(bearerPattern, current)) {
@@ -147,6 +202,11 @@ function sanitizeStringValue(
   if (hasMatch(phonePattern, current)) {
     current = current.replace(phonePattern, replacement("PHONE"));
     pushReport(report, path, "mask", "phone", "pattern_replace");
+  }
+
+  if (hasMatch(phoneWordsPattern, current)) {
+    current = current.replace(phoneWordsPattern, replacement("PHONE"));
+    pushReport(report, path, "mask", "phone-words", "pattern_replace");
   }
 
   return current;

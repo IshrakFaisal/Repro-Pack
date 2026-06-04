@@ -23,6 +23,8 @@ const config: AppConfig = {
   retentionDays: 30,
   redactIps: true,
   redactDirectIdentifiers: true,
+  dataResidencyMode: "standard",
+  requireCustomerConsent: false,
   appVersion: "test",
   buildHash: "test",
   apiKey: "test-key"

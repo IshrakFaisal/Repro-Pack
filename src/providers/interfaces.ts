@@ -93,6 +93,7 @@ export type ProcessRequestInput = {
   supportTicketId?: string;
   ticket?: unknown;
   maxAttempts?: number;
+  customerConsentConfirmed?: boolean;
 };
 
 export type ProcessResult = {

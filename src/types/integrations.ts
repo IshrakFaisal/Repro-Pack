@@ -138,6 +138,8 @@ export const TenantConfigSchema = z.object({
   name: z.string().min(1),
   redactDirectIdentifiers: z.boolean().optional(),
   retentionDays: z.number().int().positive().optional(),
+  dataResidencyMode: z.enum(["standard", "offline"]).optional(),
+  requireCustomerConsent: z.boolean().optional(),
   llm: LlmConfigSchema.optional(),
   auth: TenantAuthConfigSchema.default({ apiKeys: [] }),
   providers: TenantProviderConfigSchema.default({})
@@ -219,6 +221,8 @@ export const ResolvedTenantConfigSchema = z.object({
   name: z.string(),
   redactDirectIdentifiers: z.boolean().optional(),
   retentionDays: z.number().int().positive().optional(),
+  dataResidencyMode: z.enum(["standard", "offline"]).optional(),
+  requireCustomerConsent: z.boolean().optional(),
   llm: ResolvedLlmConfigSchema.optional(),
   auth: ResolvedTenantAuthConfigSchema.default({ apiKeys: [] }),
   providers: ResolvedTenantProviderConfigSchema

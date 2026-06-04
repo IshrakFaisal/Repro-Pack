@@ -5,9 +5,17 @@ import { enrichContext } from "../enrichment/context-enrichment";
 import { normalizeEvidence } from "../normalization/evidence-normalizer";
 import { sanitizePayload } from "../sanitizer/sanitizer";
 import { generateReproSteps } from "../repro/repro-step-generator";
+import {
+  buildAlternativeReproPaths,
+  buildMinimalReproSequence,
+  buildRedactionAuditReport,
+  classifyRegression,
+  detectEnvironmentDeltas
+} from "../repro/repro-intelligence";
 import { scoreConfidence } from "../scoring/confidence-scorer";
 import { assembleArtifacts } from "../assembly/issue-assembler";
 import { suggestLlmReproSteps } from "../llm/suggester";
+import { AppError } from "../observability/errors";
 import { writeJsonFile, writeTextFile } from "../utils/fs";
 import { truncate } from "../utils/text";
 import type { MetricsRegistry } from "../observability/metrics";
@@ -44,6 +52,11 @@ export async function processTicket(
   let outcome = "success";
 
   try {
+    const consentRequired = providers.tenant?.requireCustomerConsent ?? providers.config.requireCustomerConsent;
+    if (consentRequired && !input.customerConsentConfirmed) {
+      throw new AppError("Customer consent is required before creating a repro pack", "customer_consent_required", 403);
+    }
+
     logger.info({ event: "ingestion.started", lookup: { fixtureId: input.fixtureId, ticketPath: input.ticketPath } });
     const ticket = await ingestTicket(input, providers);
     logger.info({ event: "ingestion.completed", ticketId: ticket.ticketId });
@@ -78,11 +91,19 @@ export async function processTicket(
     }
 
     const normalized = normalizeEvidence(context);
-    const sanitizedPayload = sanitizePayload(normalized.samplePayloadCandidate, {
+    const sanitizationConfig = {
       ...providers.config,
       redactDirectIdentifiers:
         providers.tenant?.redactDirectIdentifiers ?? providers.config.redactDirectIdentifiers
-    });
+    };
+    const sanitizedPayload = sanitizePayload(normalized.samplePayloadCandidate, sanitizationConfig);
+    const textSanitizationReport: typeof sanitizedPayload.report = [];
+    const sanitizeText = (value: string): string => {
+      const result = sanitizePayload(value, sanitizationConfig);
+      textSanitizationReport.push(...result.report);
+      return String(result.payload);
+    };
+    const sanitizedComplaintText = sanitizeText(ticket.complaintText);
     logger.info({
       event: "sanitizer.completed",
       ticketId: ticket.ticketId,
@@ -96,7 +117,14 @@ export async function processTicket(
       { tenant_id: tenantId }
     );
 
-    const reproSteps = generateReproSteps(context, normalized);
+    const reproSteps = generateReproSteps(context, normalized).map((step) => ({
+      ...step,
+      step: sanitizeText(step.step)
+    }));
+    const minimalReproSequence = buildMinimalReproSequence(reproSteps);
+    const alternativeReproPaths = buildAlternativeReproPaths(context, normalized, reproSteps);
+    const environmentDeltas = detectEnvironmentDeltas(context, normalized);
+    const regressionClassification = classifyRegression(context, normalized, environmentDeltas);
     const confidence = ConfidenceScoreSchema.parse(
       scoreConfidence({ context, normalized, reproSteps, sanitizedPayload })
     );
@@ -106,7 +134,8 @@ export async function processTicket(
       overall: confidence.overall
     });
 
-    const summary = selectSummary(normalized.evidence, ticket.complaintText);
+    const summary = sanitizeText(selectSummary(normalized.evidence, ticket.complaintText));
+    const dataResidencyMode = providers.tenant?.dataResidencyMode ?? providers.config.dataResidencyMode;
     const llmSuggestions = await suggestLlmReproSteps({
       tenant: providers.tenant,
       config: providers.config,
@@ -118,18 +147,29 @@ export async function processTicket(
     const reproPack = ReproPackSchema.parse({
       ticketId: ticket.ticketId,
       summary,
-      customerImpact: normalized.customerImpact,
+      customerImpact: sanitizeText(normalized.customerImpact),
       reproSteps,
-      expectedBehavior: normalized.expectedBehavior,
-      actualBehavior: normalized.actualBehavior,
+      expectedBehavior: sanitizeText(normalized.expectedBehavior),
+      actualBehavior: sanitizeText(normalized.actualBehavior),
       environment: normalized.environment,
       featureFlags: normalized.featureFlags,
       timeline: normalized.timeline,
       logs: normalized.logs,
       samplePayload: sanitizedPayload.payload,
-      sanitizationReport: sanitizedPayload.report,
+      sanitizationReport: [...sanitizedPayload.report, ...textSanitizationReport],
       evidence: normalized.evidence,
       confidence,
+      minimalReproSequence,
+      alternativeReproPaths,
+      environmentDeltas,
+      regressionClassification,
+      redactionAuditReport: buildRedactionAuditReport(ticket.ticketId, [...sanitizedPayload.report, ...textSanitizationReport]),
+      compliance: {
+        dataResidencyMode,
+        llmUsed: Boolean(llmSuggestions),
+        customerConsentRequired: consentRequired,
+        customerConsentConfirmed: Boolean(input.customerConsentConfirmed)
+      },
       llmSuggestions
     });
 
@@ -138,7 +178,8 @@ export async function processTicket(
       reproPack,
       confidence,
       sanitizedPayload,
-      openQuestions: normalized.openQuestions
+      openQuestions: normalized.openQuestions,
+      sanitizedComplaintText
     });
     logger.info({
       event: "artifact.generated",

@@ -27,6 +27,8 @@ export async function createTestSetup() {
     retentionDays: 30,
     redactIps: true,
     redactDirectIdentifiers: true,
+    dataResidencyMode: "standard",
+    requireCustomerConsent: false,
     appVersion: "1.0.0-test",
     buildHash: "build-test",
     apiKey: "test-api-key"

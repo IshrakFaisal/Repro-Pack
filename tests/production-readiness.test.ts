@@ -102,6 +102,8 @@ describe("production readiness", () => {
       retentionDays: 30,
       redactIps: true,
       redactDirectIdentifiers: true,
+      dataResidencyMode: "standard",
+      requireCustomerConsent: false,
       appVersion: "test",
       buildHash: "test-build",
       apiKey: "test-key"
@@ -118,6 +120,7 @@ describe("production readiness", () => {
       tenantId: "default",
       dryRun: true,
       writeArtifacts: false,
+      customerConsentConfirmed: false,
       attempts: 1,
       maxAttempts: 3,
       sourceLookup: { fixtureId: "browser-only-complaint" }

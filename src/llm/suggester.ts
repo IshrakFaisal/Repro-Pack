@@ -57,6 +57,12 @@ export async function suggestLlmReproSteps(input: {
   evidence: EvidenceItem[];
 }): Promise<LlmSuggestions> {
   const tenantId = input.tenant?.tenantId ?? "default";
+  const dataResidencyMode = input.tenant?.dataResidencyMode ?? input.config.dataResidencyMode;
+  if (dataResidencyMode === "offline") {
+    input.logger.info({ event: "llm.suggestion.skipped", tenantId, reason: "offline_data_residency" });
+    return null;
+  }
+
   const llm = input.tenant?.llm;
   if (!llm?.enabled) {
     return null;

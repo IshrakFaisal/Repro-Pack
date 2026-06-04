@@ -80,6 +80,8 @@ Core runtime:
 - `RETENTION_DAYS`
 - `REDACT_IPS`
 - `REDACT_DIRECT_IDENTIFIERS`
+- `DATA_RESIDENCY_MODE`
+- `REQUIRE_CUSTOMER_CONSENT`
 - `APP_VERSION`
 - `BUILD_HASH`
 - `API_KEY`
@@ -93,6 +95,9 @@ See [tenants/example-tenant.json](C:\Users\USER\OneDrive\Desktop\New folder\Codi
 Tenant config can define:
 
 - `auth.apiKeys`
+- `dataResidencyMode`
+- `requireCustomerConsent`
+- `llm`
 - `providers.support`
 - `providers.logs`
 - `providers.session`
@@ -216,6 +221,10 @@ Operational details are in [docs/production-runbook.md](C:\Users\USER\OneDrive\D
 - Repeatedly failing async jobs are dead-lettered after `QUEUE_MAX_ATTEMPTS` or per-job `maxAttempts`.
 - Pack list responses can be filtered by `tenantId`, `status`, and `search`; sorted by `updatedAt`, `createdAt`, `ticketId`, or `confidence`; and paged with `limit` and `offset`.
 - API validation and internal-error responses are sanitized so implementation details are kept in logs, not client payloads.
+- Repro packs include a minimal repro sequence, alternative repro paths, environment deltas, regression/new-bug classification, redaction audit report, and compliance summary.
+- `DATA_RESIDENCY_MODE=offline` and tenant `dataResidencyMode: "offline"` disable outbound LLM repro suggestions.
+- `REQUIRE_CUSTOMER_CONSENT=true` or tenant `requireCustomerConsent: true` blocks pack creation until `customerConsentConfirmed` is supplied.
+- Redaction covers regex patterns, sensitive field names, locale-specific identifiers, masked emails, and phone numbers written as words.
 
 ## Testing
 
@@ -229,12 +238,14 @@ corepack pnpm test
 The suite covers:
 
 - normalization and sanitization
+- smarter repro sequencing, environment deltas, regression classification, and redaction audit metadata
 - markdown/json artifact generation
 - local HTTP and async job flows
 - real-adapter style integration tests with mocked Zendesk/GitHub/Jira backends
 - tenant auth behavior and cross-tenant access denial
 - durable job recovery and dead-letter transitions
 - failed job retry, audit listing, pack filtering/search/sort, and sanitized API errors
+- offline LLM gating and customer-consent enforcement
 - optional sandbox test scaffolding when real env vars are present
 
 ## Extending providers

@@ -3,6 +3,8 @@
   "name": "Example Tenant",
   "redactDirectIdentifiers": true,
   "retentionDays": 30,
+  "dataResidencyMode": "standard",
+  "requireCustomerConsent": false,
   "llm": {
     "enabled": false,
     "model": "claude-sonnet-4-20250514",

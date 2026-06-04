@@ -23,6 +23,8 @@ const config: AppConfig = {
   retentionDays: 30,
   redactIps: true,
   redactDirectIdentifiers: true,
+  dataResidencyMode: "standard",
+  requireCustomerConsent: false,
   appVersion: "test",
   buildHash: "test",
   apiKey: "test-key"
@@ -94,6 +96,26 @@ describe("LLM repro step suggester", () => {
     const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string) as { messages: Array<{ content: string }> };
     expect(body.messages[0]?.content).toContain("[REDACTED:EMAIL]");
     expect(body.messages[0]?.content).not.toContain("alice@example.test");
+  });
+
+  it("skips LLM calls in offline data residency mode", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await suggestLlmReproSteps({
+      tenant: { ...tenant, dataResidencyMode: "offline" },
+      config,
+      logger,
+      summary: "Checkout failed for alice@example.test",
+      reproSteps,
+      evidence
+    });
+
+    expect(result).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "llm.suggestion.skipped", reason: "offline_data_residency" })
+    );
   });
 
   it("returns null and logs when the LLM call fails", async () => {

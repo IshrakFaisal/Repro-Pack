@@ -31,4 +31,50 @@ describe("process ticket integration", () => {
     await expect(fs.readFile(jsonFile, "utf8")).resolves.toContain("\"ticketId\": \"backend-trace-correlation\"");
     await expect(fs.readFile(markdownFile, "utf8")).resolves.toContain("## Evidence and confidence");
   });
+
+  it("adds smart repro metadata and keeps issue exports sanitized", async () => {
+    const { providers, logger } = await createTestSetup();
+    const result = await processTicket(
+      {
+        dryRun: true,
+        ticket: {
+          ticketId: "backend-trace-correlation",
+          complaintText: "Customer jane.customer@example.test says checkout fails after clicking pay.",
+          tags: ["regression"],
+          timestamps: { createdAt: "2026-06-03T10:00:00.000Z" },
+          rawSource: {
+            appVersion: "0.9.0",
+            browserVersion: "119"
+          }
+        }
+      },
+      providers,
+      logger
+    );
+
+    expect(result.reproPack.minimalReproSequence.length).toBeGreaterThan(0);
+    expect(result.reproPack.alternativeReproPaths.length).toBeGreaterThan(0);
+    expect(result.reproPack.environmentDeltas.some((delta) => delta.field === "appVersion")).toBe(true);
+    expect(result.reproPack.regressionClassification.classification).toBe("likely_regression");
+    expect(result.reproPack.redactionAuditReport?.redactionCount).toBeGreaterThanOrEqual(0);
+    expect(result.reproPack.compliance).toMatchObject({
+      dataResidencyMode: "standard",
+      customerConsentRequired: false
+    });
+    expect(result.issueDraft.body).toContain("## Redaction audit report");
+    expect(result.issueDraft.body).not.toContain("jane.customer@example.test");
+    expect(result.issueDraft.body).toContain("[REDACTED:EMAIL]");
+  });
+
+  it("blocks repro generation when customer consent is required but missing", async () => {
+    const { providers, logger } = await createTestSetup();
+    providers.config.requireCustomerConsent = true;
+
+    await expect(
+      processTicket({ fixtureId: "browser-only-complaint", dryRun: true }, providers, logger)
+    ).rejects.toMatchObject({
+      code: "customer_consent_required",
+      statusCode: 403
+    });
+  });
 });

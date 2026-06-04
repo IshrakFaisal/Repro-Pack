@@ -23,7 +23,8 @@ const ProcessRequestSchema = z
     dryRun: z.boolean().optional(),
     writeArtifacts: z.boolean().optional(),
     async: z.boolean().optional(),
-    maxAttempts: z.number().int().positive().max(25).optional()
+    maxAttempts: z.number().int().positive().max(25).optional(),
+    customerConsentConfirmed: z.boolean().optional()
   })
   .refine((value) => Boolean(value.fixtureId || value.ticketPath || value.supportTicketId || value.ticket), {
     message: "fixtureId, ticketPath, supportTicketId, or ticket is required"
