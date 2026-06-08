@@ -6,6 +6,7 @@ import { syncIssuesForPack } from "../issues/issue-sync";
 import { runRetentionCleanup } from "../jobs/retention";
 import { buildAnalyticsSummary } from "../analytics/team-intelligence";
 import { exportReplayFixture } from "../replay/fixture-exporter";
+import { buildTriageRecommendations } from "../triage/recommendations";
 
 function normalizeCommandArgs(): string[] {
   const argv = process.argv.slice(2);
@@ -20,6 +21,10 @@ function parseTicketReference(ticketRef: string) {
     fixtureId: looksLikePath ? undefined : ticketRef,
     ticketPath: looksLikePath ? ticketRef : undefined
   };
+}
+
+function parseTicketReferences(ticketRefs: string[] | undefined) {
+  return (ticketRefs ?? []).map((ticketRef) => parseTicketReference(ticketRef));
 }
 
 function matchesPackSearch(pack: StoredReproPack, search?: string): boolean {
@@ -51,7 +56,7 @@ async function run() {
 
   if (!command || command === "help" || command === "--help") {
     process.stdout.write(
-      "Usage:\n  repro-pack process --ticket <fixture-id|path> [--tenant <tenant-id>] [--support-ticket-id <id>] [--dry-run] [--write-artifacts] [--async] [--max-attempts <n>] [--customer-consent-confirmed]\n  repro-pack repro --ticket <fixture-id|path> [--tenant <tenant-id>] [--support-ticket-id <id>] [--dry-run]\n  repro-pack health\n  repro-pack jobs [--tenant <tenant-id>] [--status <queued|running|succeeded|failed|dead_lettered>]\n  repro-pack job --id <job-id> [--tenant <tenant-id>]\n  repro-pack retry-job --id <job-id> [--tenant <tenant-id>]\n  repro-pack cleanup [--tenant <tenant-id>] [--write]\n  repro-pack audit-events [--tenant <tenant-id>] [--action <name>] [--outcome <success|error>] [--ticket <ticket-id>]\n  repro-pack analytics [--tenant <tenant-id>]\n  repro-pack packs [--tenant <tenant-id>] [--status <draft|reviewed|approved|rejected>] [--search <text>] [--sort <updatedAt|createdAt|ticketId|confidence>] [--direction <asc|desc>]\n  repro-pack pack --ticket <ticket-id> [--tenant <tenant-id>]\n  repro-pack review --ticket <ticket-id> --status <reviewed|approved|rejected> [--tenant <tenant-id>] [--reviewer <name>] [--note <text>]\n  repro-pack sync-issues --ticket <ticket-id> [--tenant <tenant-id>] [--target github] [--target jira] [--target linear] [--write]\n  repro-pack export-issue --ticket <ticket-id> [--tenant <tenant-id>] [--target github|jira|linear]\n  repro-pack export-replay --ticket <ticket-id> [--tenant <tenant-id>] [--output <dir>]\n"
+      "Usage:\n  repro-pack process --ticket <fixture-id|path> [--tenant <tenant-id>] [--support-ticket-id <id>] [--dry-run] [--write-artifacts] [--async] [--max-attempts <n>] [--customer-consent-confirmed]\n  repro-pack batch-process --ticket <fixture-id|path> [--ticket <fixture-id|path> ...] [--tenant <tenant-id>] [--dry-run] [--async]\n  repro-pack repro --ticket <fixture-id|path> [--tenant <tenant-id>] [--support-ticket-id <id>] [--dry-run]\n  repro-pack health\n  repro-pack jobs [--tenant <tenant-id>] [--status <queued|running|succeeded|failed|dead_lettered>]\n  repro-pack job --id <job-id> [--tenant <tenant-id>]\n  repro-pack retry-job --id <job-id> [--tenant <tenant-id>]\n  repro-pack cleanup [--tenant <tenant-id>] [--write]\n  repro-pack audit-events [--tenant <tenant-id>] [--action <name>] [--outcome <success|error>] [--ticket <ticket-id>]\n  repro-pack analytics [--tenant <tenant-id>]\n  repro-pack triage [--tenant <tenant-id>] [--status <draft|reviewed|approved|rejected>] [--limit <n>]\n  repro-pack packs [--tenant <tenant-id>] [--status <draft|reviewed|approved|rejected>] [--search <text>] [--sort <updatedAt|createdAt|ticketId|confidence>] [--direction <asc|desc>]\n  repro-pack pack --ticket <ticket-id> [--tenant <tenant-id>]\n  repro-pack review --ticket <ticket-id> --status <reviewed|approved|rejected> [--tenant <tenant-id>] [--reviewer <name>] [--note <text>]\n  repro-pack sync-issues --ticket <ticket-id> [--tenant <tenant-id>] [--target github] [--target jira] [--target linear] [--write]\n  repro-pack export-issue --ticket <ticket-id> [--tenant <tenant-id>] [--target github|jira|linear]\n  repro-pack export-replay --ticket <ticket-id> [--tenant <tenant-id>] [--output <dir>]\n"
     );
     return;
   }
@@ -131,6 +136,35 @@ async function run() {
     ]);
     process.stdout.write(
       `${JSON.stringify(buildAnalyticsSummary({ tenantId: parsed.values.tenant, packs, auditEvents }), null, 2)}\n`
+    );
+    return;
+  }
+
+  if (command === "triage") {
+    const parsed = parseArgs({
+      args: rest,
+      options: {
+        tenant: { type: "string" },
+        status: { type: "string" },
+        limit: { type: "string" }
+      }
+    });
+    const status = parsed.values.status;
+    if (status && !["draft", "reviewed", "approved", "rejected"].includes(status)) {
+      throw new Error("--status must be one of draft, reviewed, approved, rejected");
+    }
+
+    const packs = await store.listPacks(parsed.values.tenant);
+    process.stdout.write(
+      `${JSON.stringify(
+        buildTriageRecommendations({
+          packs,
+          status: status as "draft" | "reviewed" | "approved" | "rejected" | undefined,
+          limit: parsed.values.limit ? Number(parsed.values.limit) : undefined
+        }),
+        null,
+        2
+      )}\n`
     );
     return;
   }
@@ -374,6 +408,88 @@ async function run() {
 
     const exported = await exportReplayFixture({ config, record, outputDir: parsed.values.output });
     process.stdout.write(`${JSON.stringify(exported, null, 2)}\n`);
+    return;
+  }
+
+  if (command === "batch-process") {
+    const parsed = parseArgs({
+      args: rest,
+      options: {
+        ticket: { type: "string", multiple: true },
+        tenant: { type: "string" },
+        "dry-run": { type: "boolean" },
+        async: { type: "boolean" },
+        "write-artifacts": { type: "boolean" },
+        "customer-consent-confirmed": { type: "boolean" }
+      }
+    });
+    const lookups = parseTicketReferences(parsed.values.ticket);
+    if (lookups.length === 0) {
+      throw new Error("At least one --ticket is required");
+    }
+
+    const tenantId = parsed.values.tenant ?? "default";
+    if (parsed.values.async) {
+      const enqueued = [];
+      for (const lookup of lookups) {
+        const job = await jobs.enqueue({
+          ...lookup,
+          tenantId,
+          dryRun: parsed.values["dry-run"],
+          writeArtifacts: parsed.values["write-artifacts"],
+          customerConsentConfirmed: parsed.values["customer-consent-confirmed"]
+        });
+        enqueued.push({ status: "enqueued", jobId: job.jobId, sourceLookup: job.sourceLookup });
+      }
+      process.stdout.write(`${JSON.stringify({ tenantId, async: true, results: enqueued }, null, 2)}\n`);
+      return;
+    }
+
+    const providerSet = await providers.create({ tenantId });
+    const results = [];
+    for (const lookup of lookups) {
+      try {
+        const result = await processTicket(
+          {
+            ...lookup,
+            tenantId,
+            dryRun: parsed.values["dry-run"],
+            writeArtifacts: parsed.values["write-artifacts"],
+            customerConsentConfirmed: parsed.values["customer-consent-confirmed"]
+          },
+          providerSet,
+          logger
+        );
+        const storedPack = await jobs.persistSynchronousResult({
+          tenantId,
+          ticketId: result.ticket.ticketId,
+          dryRun: result.dryRun,
+          sourceLookup: lookup,
+          reproPack: result.reproPack,
+          issueDraft: result.issueDraft,
+          markdown: result.markdown,
+          providerResults: {
+            session: result.context.session,
+            logs: result.context.logs,
+            featureFlags: result.context.featureFlags,
+            release: result.context.release
+          }
+        });
+        results.push({
+          status: "processed",
+          ticketId: result.ticket.ticketId,
+          reviewStatus: storedPack.status,
+          confidence: result.reproPack.confidence.overall,
+          customerImpactScore: result.reproPack.customerImpactScore.score
+        });
+      } catch (error) {
+        results.push({
+          status: "error",
+          error: error instanceof Error ? error.message : "Unknown batch processing error"
+        });
+      }
+    }
+    process.stdout.write(`${JSON.stringify({ tenantId, async: false, results }, null, 2)}\n`);
     return;
   }
 

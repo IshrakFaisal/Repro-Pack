@@ -9,6 +9,7 @@ import { normalizeEvidence } from "../normalization/evidence-normalizer";
 import { createRuntime } from "../runtime/app-runtime";
 import { syncIssuesForPack } from "../issues/issue-sync";
 import { buildAnalyticsSummary } from "../analytics/team-intelligence";
+import { buildTriageRecommendations } from "../triage/recommendations";
 import type { StoredReproPack } from "../types/schemas";
 import { WebhookDispatcher } from "../webhooks/dispatcher";
 import type { PackWebhookEvent } from "../webhooks/events";
@@ -30,6 +31,32 @@ const ProcessRequestSchema = z
   .refine((value) => Boolean(value.fixtureId || value.ticketPath || value.supportTicketId || value.ticket), {
     message: "fixtureId, ticketPath, supportTicketId, or ticket is required"
   });
+
+const BatchProcessRequestSchema = z.object({
+  tenantId: z.string().optional(),
+  async: z.boolean().optional(),
+  dryRun: z.boolean().optional(),
+  writeArtifacts: z.boolean().optional(),
+  customerConsentConfirmed: z.boolean().optional(),
+  items: z
+    .array(
+      z
+        .object({
+          fixtureId: z.string().optional(),
+          ticketPath: z.string().optional(),
+          supportTicketId: z.string().optional(),
+          ticket: z.unknown().optional(),
+          dryRun: z.boolean().optional(),
+          writeArtifacts: z.boolean().optional(),
+          customerConsentConfirmed: z.boolean().optional()
+        })
+        .refine((value) => Boolean(value.fixtureId || value.ticketPath || value.supportTicketId || value.ticket), {
+          message: "fixtureId, ticketPath, supportTicketId, or ticket is required"
+        })
+    )
+    .min(1)
+    .max(25)
+});
 
 const TenantQuerySchema = z.object({
   tenantId: z.string().optional()
@@ -58,6 +85,11 @@ const AuditListQuerySchema = TenantQuerySchema.extend({
   ticketId: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   offset: z.coerce.number().int().min(0).default(0)
+});
+
+const TriageQuerySchema = TenantQuerySchema.extend({
+  status: z.enum(["draft", "reviewed", "approved", "rejected"]).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20)
 });
 
 const ReviewRequestSchema = z.object({
@@ -307,6 +339,102 @@ export async function createApp() {
     });
   });
 
+  app.post("/tickets/batch-process", async (request, reply) => {
+    const actor = ensureRole((request as FastifyRequestWithActor).authActor, "process");
+    const body = BatchProcessRequestSchema.parse(request.body);
+    const tenantId = resolveTenantScope(actor, body.tenantId);
+
+    if (body.async) {
+      const enqueued = [];
+      for (const item of body.items) {
+        const job = await jobs.enqueue({
+          ...item,
+          tenantId,
+          dryRun: item.dryRun ?? body.dryRun,
+          writeArtifacts: item.writeArtifacts ?? body.writeArtifacts,
+          customerConsentConfirmed: item.customerConsentConfirmed ?? body.customerConsentConfirmed,
+          actor
+        });
+        enqueued.push({
+          status: "enqueued",
+          jobId: job.jobId,
+          sourceLookup: job.sourceLookup
+        });
+      }
+
+      await store.recordAuditEvent({
+        tenantId,
+        action: "ticket.batch_processing.enqueued",
+        outcome: "success",
+        actor,
+        metadata: { count: enqueued.length }
+      });
+      reply.status(202).send({ tenantId, async: true, results: enqueued });
+      return;
+    }
+
+    const providerSet = await providers.create({ tenantId });
+    const results = [];
+    for (const item of body.items) {
+      try {
+        const result = await processTicket(
+          {
+            ...item,
+            tenantId,
+            dryRun: item.dryRun ?? body.dryRun,
+            writeArtifacts: item.writeArtifacts ?? body.writeArtifacts,
+            customerConsentConfirmed: item.customerConsentConfirmed ?? body.customerConsentConfirmed
+          },
+          providerSet,
+          logger,
+          metrics
+        );
+        const storedPack = await jobs.persistSynchronousResult({
+          tenantId,
+          ticketId: result.ticket.ticketId,
+          dryRun: result.dryRun,
+          sourceLookup: {
+            fixtureId: item.fixtureId,
+            ticketPath: item.ticketPath,
+            supportTicketId: item.supportTicketId
+          },
+          reproPack: result.reproPack,
+          issueDraft: result.issueDraft,
+          markdown: result.markdown,
+          providerResults: {
+            session: result.context.session,
+            logs: result.context.logs,
+            featureFlags: result.context.featureFlags,
+            release: result.context.release
+          }
+        });
+        results.push({
+          status: "processed",
+          ticketId: result.ticket.ticketId,
+          reviewStatus: storedPack.status,
+          confidence: result.reproPack.confidence.overall,
+          customerImpactScore: result.reproPack.customerImpactScore.score
+        });
+      } catch (error) {
+        const classified = classifyError(error);
+        results.push({
+          status: "error",
+          error: classified.message,
+          code: classified.code
+        });
+      }
+    }
+
+    await store.recordAuditEvent({
+      tenantId,
+      action: "ticket.batch_processed",
+      outcome: results.some((result) => result.status === "error") ? "error" : "success",
+      actor,
+      metadata: { count: results.length, errorCount: results.filter((result) => result.status === "error").length }
+    });
+    reply.send({ tenantId, async: false, results });
+  });
+
   app.get("/jobs", async (request) => {
     const actor = ensureRole((request as FastifyRequestWithActor).authActor, "read");
     const query = JobListQuerySchema.parse(request.query);
@@ -338,6 +466,14 @@ export async function createApp() {
     ]);
 
     return buildAnalyticsSummary({ tenantId, packs, auditEvents });
+  });
+
+  app.get("/triage/recommendations", async (request) => {
+    const actor = ensureRole((request as FastifyRequestWithActor).authActor, "read");
+    const query = TriageQuerySchema.parse(request.query);
+    const tenantId = resolveListTenantScope(actor, query.tenantId);
+    const packs = await store.listPacks(tenantId);
+    return buildTriageRecommendations({ packs, status: query.status, limit: query.limit });
   });
 
   app.get("/jobs/:id", async (request, reply) => {

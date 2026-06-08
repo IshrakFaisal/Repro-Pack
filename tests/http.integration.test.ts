@@ -259,6 +259,54 @@ describe("http endpoints", () => {
     );
   });
 
+  it("batch processes tickets and returns triage recommendations", async () => {
+    const app = await createApp();
+    const headers = { "x-api-key": "test-api-key" };
+
+    const batchResponse = await app.inject({
+      method: "POST",
+      url: "/tickets/batch-process",
+      headers,
+      payload: {
+        dryRun: true,
+        items: [
+          { fixtureId: "backend-trace-correlation" },
+          { fixtureId: "feature-flag-regression" },
+          { fixtureId: "missing-fixture" }
+        ]
+      }
+    });
+
+    const triageResponse = await app.inject({
+      method: "GET",
+      url: "/triage/recommendations?status=draft&limit=2",
+      headers
+    });
+
+    const packsResponse = await app.inject({
+      method: "GET",
+      url: "/packs?sort=ticketId&direction=asc",
+      headers
+    });
+    await app.close();
+
+    expect(batchResponse.statusCode).toBe(200);
+    expect(batchResponse.json().results).toHaveLength(3);
+    expect(batchResponse.json().results.filter((result: { status: string }) => result.status === "processed")).toHaveLength(2);
+    expect(batchResponse.json().results.filter((result: { status: string }) => result.status === "error")).toHaveLength(1);
+    expect(packsResponse.json().map((pack: { ticketId: string }) => pack.ticketId)).toEqual([
+      "backend-trace-correlation",
+      "feature-flag-regression"
+    ]);
+    expect(triageResponse.statusCode).toBe(200);
+    expect(triageResponse.json()).toHaveLength(2);
+    expect(triageResponse.json()[0]).toMatchObject({
+      ticketId: expect.any(String),
+      score: expect.any(Number),
+      reasons: expect.any(Array)
+    });
+  });
+
   it("lists jobs with status filters and safely retries failed jobs", async () => {
     const app = await createApp();
     const headers = { "x-api-key": "test-api-key" };

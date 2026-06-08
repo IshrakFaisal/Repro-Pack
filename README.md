@@ -12,6 +12,8 @@ This repo now supports:
 - native Sentry/Datadog log ingestion plus generic HTTP adapters for logs, session replay, feature flags, and release metadata
 - Slack review-request and approval notifications
 - analytics summaries for confidence trends, support-to-close cycle time, feature flag correlation, and customer impact
+- batch ticket processing for support queues
+- triage recommendations that rank packs by impact, confidence, regression signals, and review/sync state
 - replay fixture export for local reproduction without live providers
 - typed SDK helpers for custom source adapters
 - tenant-aware auth and access control
@@ -133,11 +135,13 @@ Public endpoints:
 Protected endpoints:
 
 - `POST /tickets/process`
+- `POST /tickets/batch-process`
 - `GET /jobs`
 - `GET /jobs/:id`
 - `POST /jobs/:id/retry`
 - `GET /audit-events`
 - `GET /analytics/summary`
+- `GET /triage/recommendations`
 - `GET /packs`
 - `GET /packs/:ticketId`
 - `POST /packs/:ticketId/review`
@@ -165,6 +169,12 @@ Zendesk:
 corepack pnpm cli -- process --tenant acme --support-ticket-id 12345 --dry-run
 ```
 
+Batch process fixtures:
+
+```bash
+corepack pnpm cli -- batch-process --ticket backend-trace-correlation --ticket feature-flag-regression --dry-run
+```
+
 List jobs:
 
 ```bash
@@ -187,6 +197,12 @@ Analytics summary:
 
 ```bash
 corepack pnpm cli -- analytics --tenant acme
+```
+
+Triage recommendations:
+
+```bash
+corepack pnpm cli -- triage --tenant acme --status draft --limit 10
 ```
 
 Search packs:
@@ -240,6 +256,7 @@ Operational details are in [docs/production-runbook.md](C:\Users\USER\OneDrive\D
 - Linear sync re-discovers issues by stored link or repro-pack marker search before create/update.
 - Dry-run remains the default safe review flow.
 - Audit events are recorded for processing, review, sync, auth failures, and request/config errors.
+- Batch processing returns per-ticket results so one bad ticket does not prevent other tickets in the batch from being persisted or queued.
 - Failed async jobs can be retried explicitly; non-failed jobs are not moved back to the queue.
 - Repeatedly failing async jobs are dead-lettered after `QUEUE_MAX_ATTEMPTS` or per-job `maxAttempts`.
 - Pack list responses can be filtered by `tenantId`, `status`, and `search`; sorted by `updatedAt`, `createdAt`, `ticketId`, or `confidence`; and paged with `limit` and `offset`.
@@ -269,6 +286,7 @@ The suite covers:
 - real-adapter style integration tests with mocked Zendesk/GitHub/Jira/Linear backends
 - Slack review-request and approval webhook payloads
 - analytics summary endpoint output
+- batch processing and triage recommendation endpoints
 - replay fixture export
 - tenant auth behavior and cross-tenant access denial
 - durable job recovery and dead-letter transitions

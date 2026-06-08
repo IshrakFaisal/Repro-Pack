@@ -32,6 +32,7 @@ Watch for:
 - Sentry/Datadog provider auth, timeout, or rate-limit failures
 - falling confidence trend or increasing support-to-close cycle time in analytics summaries
 - feature flags with repeated regression correlations
+- growing triage backlog of high-impact draft packs
 - auth failures
 - config errors for missing tenant files or unresolved secrets
 - issue sync create/update spikes
@@ -52,6 +53,8 @@ Queue operations:
 - Dead-lettered jobs are terminal and are intentionally not eligible for retry
 - List audit events with `GET /audit-events?tenantId=<tenant>&action=<action>&outcome=<success|error>` or `corepack pnpm cli -- audit-events --tenant <tenant> --action <action>`
 - Review analytics with `GET /analytics/summary?tenantId=<tenant>` or `corepack pnpm cli -- analytics --tenant <tenant>`
+- Review triage recommendations with `GET /triage/recommendations?tenantId=<tenant>&status=draft` or `corepack pnpm cli -- triage --tenant <tenant> --status draft`
+- Batch process support queues with `POST /tickets/batch-process` or `corepack pnpm cli -- batch-process --ticket <id> --ticket <id> --dry-run`
 - Repeated retry failures usually mean the original ticket lookup, tenant config, or provider credentials need correction before retrying again
 
 ## Secret configuration
@@ -85,6 +88,7 @@ Add the provider implementation in [src/secrets/manager.ts](C:\Users\USER\OneDri
 - Confidence trend groups stored packs by creation date and averages `confidence.overall`.
 - Support-to-close cycle time uses first successful issue sync as the close signal, falling back to approval time when sync has not happened.
 - Feature flag correlation aggregates stored packs by flag/variant, regression classification, confidence, and impact score.
+- Triage recommendations rank packs by customer impact score, review state, regression classification, confidence, feature flag state, and whether approved packs have been synced externally.
 - Replay fixture export writes sanitized `ticket.json`, provider fixture files when available, `repro-pack.json`, `issue.md`, and a README under `ARTIFACT_OUTPUT_DIR/replay-fixtures/<tenant>/<ticket>` by default.
 - Replay exported fixtures are safe for local developer workflows because they are built from sanitized stored packs, but still keep artifact storage private by default.
 
