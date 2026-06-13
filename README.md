@@ -14,6 +14,7 @@ This repo now supports:
 - analytics summaries for confidence trends, support-to-close cycle time, feature flag correlation, and customer impact
 - batch ticket processing for support queues
 - triage recommendations that rank packs by impact, confidence, regression signals, and review/sync state
+- pack comparison to spot duplicates, shared signals, and environment drift
 - replay fixture export for local reproduction without live providers
 - typed SDK helpers for custom source adapters
 - tenant-aware auth and access control
@@ -144,6 +145,7 @@ Protected endpoints:
 - `GET /triage/recommendations`
 - `GET /packs`
 - `GET /packs/:ticketId`
+- `GET /packs/:ticketId/compare/:otherTicketId`
 - `POST /packs/:ticketId/review`
 - `POST /packs/:ticketId/sync-issues`
 - `POST /issues/:ticketId/export`
@@ -211,6 +213,12 @@ Search packs:
 corepack pnpm cli -- packs --tenant acme --search checkout --sort confidence --direction desc
 ```
 
+Compare packs:
+
+```bash
+corepack pnpm cli -- compare-packs --tenant acme --left zendesk-12345 --right zendesk-67890
+```
+
 Approve:
 
 ```bash
@@ -257,6 +265,7 @@ Operational details are in [docs/production-runbook.md](C:\Users\USER\OneDrive\D
 - Dry-run remains the default safe review flow.
 - Audit events are recorded for processing, review, sync, auth failures, and request/config errors.
 - Batch processing returns per-ticket results so one bad ticket does not prevent other tickets in the batch from being persisted or queued.
+- Pack comparison reports confidence/impact deltas, shared feature flags, environment differences, shared signals, repro-step overlap, and a duplicate-likelihood recommendation.
 - Failed async jobs can be retried explicitly; non-failed jobs are not moved back to the queue.
 - Repeatedly failing async jobs are dead-lettered after `QUEUE_MAX_ATTEMPTS` or per-job `maxAttempts`.
 - Pack list responses can be filtered by `tenantId`, `status`, and `search`; sorted by `updatedAt`, `createdAt`, `ticketId`, or `confidence`; and paged with `limit` and `offset`.
@@ -287,6 +296,7 @@ The suite covers:
 - Slack review-request and approval webhook payloads
 - analytics summary endpoint output
 - batch processing and triage recommendation endpoints
+- pack comparison endpoint
 - replay fixture export
 - tenant auth behavior and cross-tenant access denial
 - durable job recovery and dead-letter transitions

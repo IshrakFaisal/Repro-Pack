@@ -10,6 +10,7 @@ import { createRuntime } from "../runtime/app-runtime";
 import { syncIssuesForPack } from "../issues/issue-sync";
 import { buildAnalyticsSummary } from "../analytics/team-intelligence";
 import { buildTriageRecommendations } from "../triage/recommendations";
+import { compareReproPacks } from "../compare/pack-comparison";
 import type { StoredReproPack } from "../types/schemas";
 import { WebhookDispatcher } from "../webhooks/dispatcher";
 import type { PackWebhookEvent } from "../webhooks/events";
@@ -540,6 +541,25 @@ export async function createApp() {
     }
 
     reply.send(pack);
+  });
+
+  app.get("/packs/:ticketId/compare/:otherTicketId", async (request, reply) => {
+    const actor = ensureRole((request as FastifyRequestWithActor).authActor, "read");
+    const params = z.object({ ticketId: z.string(), otherTicketId: z.string() }).parse(request.params);
+    const query = TenantQuerySchema.extend({ otherTenantId: z.string().optional() }).parse(request.query);
+    const tenantId = resolveTenantScope(actor, query.tenantId);
+    const otherTenantId = resolveTenantScope(actor, query.otherTenantId ?? tenantId);
+    const [left, right] = await Promise.all([
+      store.getPack(params.ticketId, tenantId),
+      store.getPack(params.otherTicketId, otherTenantId)
+    ]);
+
+    if (!left || !right) {
+      reply.status(404).send({ error: "Repro pack not found" });
+      return;
+    }
+
+    reply.send(compareReproPacks(left, right));
   });
 
   app.post("/packs/:ticketId/review", async (request, reply) => {

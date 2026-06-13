@@ -54,6 +54,7 @@ Queue operations:
 - List audit events with `GET /audit-events?tenantId=<tenant>&action=<action>&outcome=<success|error>` or `corepack pnpm cli -- audit-events --tenant <tenant> --action <action>`
 - Review analytics with `GET /analytics/summary?tenantId=<tenant>` or `corepack pnpm cli -- analytics --tenant <tenant>`
 - Review triage recommendations with `GET /triage/recommendations?tenantId=<tenant>&status=draft` or `corepack pnpm cli -- triage --tenant <tenant> --status draft`
+- Compare related packs with `GET /packs/<ticket>/compare/<otherTicket>?tenantId=<tenant>` or `corepack pnpm cli -- compare-packs --tenant <tenant> --left <ticket> --right <ticket>`
 - Batch process support queues with `POST /tickets/batch-process` or `corepack pnpm cli -- batch-process --ticket <id> --ticket <id> --dry-run`
 - Repeated retry failures usually mean the original ticket lookup, tenant config, or provider credentials need correction before retrying again
 
@@ -89,6 +90,7 @@ Add the provider implementation in [src/secrets/manager.ts](C:\Users\USER\OneDri
 - Support-to-close cycle time uses first successful issue sync as the close signal, falling back to approval time when sync has not happened.
 - Feature flag correlation aggregates stored packs by flag/variant, regression classification, confidence, and impact score.
 - Triage recommendations rank packs by customer impact score, review state, regression classification, confidence, feature flag state, and whether approved packs have been synced externally.
+- Pack comparison helps deduplicate support escalations by highlighting shared flags, error/regression signals, repro-step overlap, confidence/impact deltas, and environment drift.
 - Replay fixture export writes sanitized `ticket.json`, provider fixture files when available, `repro-pack.json`, `issue.md`, and a README under `ARTIFACT_OUTPUT_DIR/replay-fixtures/<tenant>/<ticket>` by default.
 - Replay exported fixtures are safe for local developer workflows because they are built from sanitized stored packs, but still keep artifact storage private by default.
 

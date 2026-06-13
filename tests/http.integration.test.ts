@@ -288,6 +288,11 @@ describe("http endpoints", () => {
       url: "/packs?sort=ticketId&direction=asc",
       headers
     });
+    const compareResponse = await app.inject({
+      method: "GET",
+      url: "/packs/backend-trace-correlation/compare/feature-flag-regression",
+      headers
+    });
     await app.close();
 
     expect(batchResponse.statusCode).toBe(200);
@@ -304,6 +309,16 @@ describe("http endpoints", () => {
       ticketId: expect.any(String),
       score: expect.any(Number),
       reasons: expect.any(Array)
+    });
+    expect(compareResponse.statusCode).toBe(200);
+    expect(compareResponse.json()).toMatchObject({
+      left: { ticketId: "backend-trace-correlation" },
+      right: { ticketId: "feature-flag-regression" },
+      duplicateLikelihood: expect.any(Number),
+      recommendation: expect.any(String),
+      stepOverlap: {
+        sharedStepCount: expect.any(Number)
+      }
     });
   });
 
